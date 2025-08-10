@@ -287,33 +287,53 @@ def admin_login():
 
 import hashlib  # if you're using hashlib for hashing
 
-@app.route('/login', methods=['GET'])
-def login_page():
-    return render_template('login.html')
+# Load Firebase public config from file
+@app.route("/firebase-config")
+def firebase_config():
+    with open("serviceAccountKey.json") as f:  # This is the *public* web config JSON
+        config = json.load(f)
+    return jsonify(config)
 
-@app.route('/api/login', methods=['POST'])
-def login_api():
-    data = request.get_json(force=True)
-    id_token = request.json.get('idToken')
-    try:
-        decoded_token = auth.verify_id_token(id_token)
-        uid = decoded_token['uid']
-        email = decoded_token.get('email')
-        name = decoded_token.get('name')
+# Handle login data from frontend
+@app.route("/firebase-login", methods=["POST"])
+def firebase_login():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid request"}), 400
 
-        # Check if user exists in your DB, else register them
-        # Save session and redirect
-        session['user_email'] = email
-        session['user_name'] = name
-        session.permanent = True
-        return redirect('/home')
-        return jsonify({'success': True})
-    except Exception as e:
-        print("Login error:", e)
-        return jsonify({'success': False}), 401
-    return render_template('login.html', error=error)
+    email = data.get("email")
+    name = data.get("name")
+    phone = data.get("phone_number")
 
+    if not email:
+        return jsonify({"error": "Email is required"}), 400
 
+    conn, cursor = get_db_connection()
+
+    # Check if user exists
+    cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
+    user = cursor.fetchone()
+
+    if not user:
+        # First time login → insert new user
+        cursor.execute("""
+            INSERT INTO users (email, name, phone_number)
+            VALUES (%s, %s, %s)
+        """, (email, name, phone))
+        conn.commit()
+        cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
+        user = cursor.fetchone()
+
+    # Create session
+    session["user_id"] = user["id"]
+    session["email"] = user["email"]
+    session["name"] = user["name"]
+    session.permanent = True
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({"message": "Login successful"})
 # Admin Route Protection & Notifications ---
 
 @app.route('/admin/dashboard')
