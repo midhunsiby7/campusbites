@@ -1,5 +1,8 @@
-import eventlet
-eventlet.monkey_patch()
+from gevent import monkey
+monkey.patch_all()
+
+from flask_socketio import SocketIO
+
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
 import json
 import mysql.connector
@@ -28,7 +31,7 @@ from firebase_admin import credentials, auth
 
 # At the top
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, async_mode='gevent')
 
 cred = credentials.Certificate("serviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
