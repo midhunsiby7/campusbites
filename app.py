@@ -287,8 +287,13 @@ def admin_login():
 
 import hashlib  # if you're using hashlib for hashing
 
-@app.route('/login', methods=['get','POST'])
-def firebase_login():
+@app.route('/login', methods=['GET'])
+def login_page():
+    return render_template('login.html')
+
+@app.route('/api/login', methods=['POST'])
+def login_api():
+    data = request.get_json(force=True)
     id_token = request.json.get('idToken')
     try:
         decoded_token = auth.verify_id_token(id_token)
@@ -1339,6 +1344,6 @@ def orders():
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5055)
 
 
