@@ -1,7 +1,3 @@
-from gevent import monkey
-monkey.patch_all()
-
-from flask_socketio import SocketIO
 
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
 import json
@@ -23,7 +19,6 @@ import schedule
 import threading
 # Background daily scheduler thread
 import pytz
-from flask_socketio import SocketIO, emit
 import firebase_admin
 from firebase_admin import credentials, auth
 
@@ -31,7 +26,7 @@ from firebase_admin import credentials, auth
 
 # At the top
 app = Flask(__name__)
-socketio = SocketIO(app, async_mode='gevent')
+
 
 cred = credentials.Certificate("serviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
@@ -1007,12 +1002,6 @@ def order_single():
             'key_id': RAZORPAY_KEY_ID,
             'user_name': session.get('name', 'Customer')
         })
-        # Inside your order or registration route
-        socketio.emit('new_notification', {
-        'message': f'New order placed by {user_name}!',
-        'type': 'order'
-       }, broadcast=True)
-
 
     except Exception as e:
         print(f"Error creating single order: {e}")
@@ -1064,11 +1053,6 @@ def order_all_from_cart():
             'key_id': RAZORPAY_KEY_ID,
             'user_name': session.get('name', 'Customer')
         })
-        # Inside your order or registration route
-        socketio.emit('new_notification', {
-        'message': f'New order placed by {user_name}!',
-        'type': 'order'
-        }, broadcast=True)
 
 
     except Exception as e:
@@ -1355,5 +1339,6 @@ def orders():
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
 
 if __name__ == '__main__':
-    app.run(app, host='0.0.0.0', port=5055, debug=True)
+    app.run(host="0.0.0.0", port=5000)
+
 
