@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Scan QR - Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  
+    
+</head>
+<body class="home-body has-bottom-nav">
+  <header class="admin-header">
+    <h1>Scan QR</h1>
+    <nav>
+      <a href="/admin/dashboard">Dashboard</a>
+      <a href="/admin/foods">Manage Foods</a>
+      <a href="/admin/todays-menu">Set Menu</a>
+      <form action="/admin/logout" method="GET" style="display:inline;">
+        <button class="logout-btn">Logout</button>
+      </form>
+    </nav>
+  </header>
+
+  {# Conditional rendering: Show scanner if no order is found in the context #}
+  {% if not order %}
+    <h2>Scan QR to confirm order</h2>
+    <div id="reader"></div>
+    <div id="result" class="token-result"></div>
+  {% else %}
+    {# Show order details if order object is passed to template (after a scan redirect) #}
+    <div class="order-detail">
+      <h2>Order #{{ order.order_id }}</h2>
+
+      <div class="order-info">
+        <p><strong>Token:</strong> {{ order.token_number }}</p>
+        <p><strong>User:</strong> {{ order.user_name }} ({{ order.admission_number }})</p>
+        <p><strong>Status:</strong> <span id="order-status-display">{{ order.status }}</span></p>
+        <p><strong>Total:</strong> ₹{{ order.total }}</p>
+        <p><strong>Time:</strong> {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+      </div>
+
+      <div class="items-list">
+        <h3>Items</h3>
+        <ul>
+          {% for item in items %}
+          <li>
+              {% if item.food_image %}
+                  <img src="{{ url_for('static', filename='uploads/' + item.food_image) }}" alt="{{ item.food_name }}">
+              {% endif %}
+              {{ item.food_name }} × {{ item.quantity }} — ₹{{ item.quantity * item.price }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      {# Conditional buttons based on order status #}
+      <div id="action-buttons-container">
+          {% if order.status == 'pending' %}
+              <button class="mark-btn confirm" onclick="processOrderAction('/admin/confirm-token', '{{ order.token_number }}', 'confirm')">Confirm Order (via QR)</button>
+          {% elif order.status == 'confirmed' %}
+              <button class="mark-btn deliver" onclick="processOrderAction('/admin/collect/{{ order.order_id }}', null, 'collect')">Mark as Collected (via QR)</button>
+          {% elif order.status == 'delivered' or order.status == 'collected' %}
+        <button class="mark-btn" disabled>Already {{ order.status|capitalize }}</button>
+      {% endif %}
+      </div>
+
+      <div style="text-align:center;">
+        <a class="back-to-scan" href="/admin/scan-qr">← Scan Another QR</a>
+      </div>
+    </div>
+  {% endif %}
+
+  <script>
+    if (document.getElementById('reader')) {
+      let html5QrcodeScanner = null;
+
+      function onScanSuccess(decodedText) {
+        if (html5QrcodeScanner) {
+            html5QrcodeScanner.stop().catch(err => {
+                console.error("Error stopping scanner:", err);
+            });
+        }
+
+        const orderIdMatch = decodedText.match(/OrderID:(\d+)/);
+        if (orderIdMatch && orderIdMatch[1]) {
+          const orderId = orderIdMatch[1];
+          window.location.href = `/admin/scan_order/${orderId}`;
+        } else {
+          document.getElementById("result").innerText = "Invalid QR Code: No Order ID found.";
+          document.getElementById("result").style.color = "red";
+        }
+      }
+
+      function onScanError(errorMessage) {
+        // console.warn(`QR scan error: ${errorMessage}`);
+      }
+
+      html5QrcodeScanner = new Html5Qrcode("reader");
+      html5QrcodeScanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess,
+        onScanError
+      ).catch(err => {
+        document.getElementById("reader").innerHTML = `<p style="color: red;">Error starting scanner: ${err}. Please ensure camera access is granted and you are on a secure (HTTPS) connection.</p>`;
+        console.error("Failed to start scanner:", err);
+      });
+    }
+
+    async function processOrderAction(actionUrl, token = null, actionType) {
+        let requestBody;
+        let headers = {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        };
+
+        if (token) {
+            requestBody = `token=${token}`;
+        } else {
+            requestBody = '';
+        }
+
+        try {
+            const response = await fetch(actionUrl, {
+                method: 'POST',
+                headers: headers,
+                body: requestBody
+            });
+
+            const contentType = response.headers.get("content-type");
+            let result;
+            if (contentType && contentType.includes("application/json")) {
+                result = await response.json();
+            } else {
+                const errorText = await response.text();
+                console.error('Expected JSON, got HTML. Raw response:', errorText);
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'error',
+                    title: `Server error: Unexpected response. (Status: ${response.status})`,
+                    text: 'Please check console for more details.',
+                    showConfirmButton: true,
+                    timer: 5000,
+                    timerProgressBar: true
+                });
+                return;
+            }
+
+            if (result.success) {
+                let successMessage = '';
+                let newStatus = '';
+
+                if (actionType === 'confirm') {
+                    successMessage = 'Order confirmed successfully!';
+                    newStatus = result.status_changed_to || 'confirmed';
+                } else if (actionType === 'collect') {
+                    successMessage = 'Order marked as collected!';
+                    newStatus = result.status_changed_to || 'collected';
+                } else {
+                    successMessage = 'Order updated successfully!';
+                    newStatus = 'updated';
+                }
+
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'success',
+                    title: successMessage,
+                    showConfirmButton: false,
+                    timer: 2000,
+                    timerProgressBar: true
+                }).then(() => {
+                    const statusDisplay = document.getElementById('order-status-display');
+                    if (statusDisplay) {
+                        statusDisplay.innerText = newStatus.charAt(0).toUpperCase() + newStatus.slice(1);
+                    }
+                    const actionButtonsContainer = document.getElementById('action-buttons-container');
+                    if (actionButtonsContainer) {
+                        if (newStatus === 'confirmed') {
+                             actionButtonsContainer.innerHTML = `
+                                <button class="mark-btn deliver" onclick="processOrderAction('/admin/collect/{{ order.order_id }}', null, 'collect')">Mark as Collected (via QR)</button>
+                             `;
+                        } else { // After collected/delivered/any final state
+                             actionButtonsContainer.innerHTML = `<button class="mark-btn" disabled>Already ${newStatus.charAt(0).toUpperCase() + newStatus.slice(1)}</button>`;
+                        }
+                    }
+                });
+            } else {
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'error',
+                    title: result.error || `Failed to process order action! Status: ${response.status}`,
+                    showConfirmButton: false,
+                    timer: 2500,
+                    timerProgressBar: true
+                });
+            }
+        } catch (error) {
+            console.error('Error in processOrderAction:', error);
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'error',
+                title: 'Network error or server issue!',
+                showConfirmButton: false,
+                timer: 2500,
+                timerProgressBar: true
+            });
+        }
+    }
+  </script>
+
+</body>
+</html>

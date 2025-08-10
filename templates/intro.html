@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Welcome - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="intro-page">
+  <div class="intro-container">
+    <lottie-player 
+      src="{{ url_for('static', filename='images/intro.json') }}"  
+      background="transparent"  
+      speed="1"  
+      style="width: 300px; height: 300px;"  
+      loop  
+      autoplay>
+    </lottie-player>
+    
+    <h1 class="intro-heading">Welcome to CAMPUSBITES</h1>
+    
+  </div>
+  <script>
+    setTimeout(() => {
+      fetch('/check-login')
+        .then(res => res.json())
+        .then(data => {
+          if (data.logged_in) {
+            // --- START OF MODIFICATION ---
+            // If logged in, check if admin or regular user
+            if (data.role === 'admin') {
+                window.location.href = "/admin/dashboard";
+            } else { // Assuming 'user' or default role
+                window.location.href = "/home";
+            }
+            // --- END OF MODIFICATION ---
+          } else {
+            window.location.href = "/login";
+          }
+        })
+        .catch(error => {
+            console.error("Error checking login status:", error);
+            window.location.href = "/login"; // Redirect to login on API error
+        });
+    }, 3000);
+  </script>
+</body>
+</html>

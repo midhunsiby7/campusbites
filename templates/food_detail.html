@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ food.name }} - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/food.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+
+</head>
+<body class="food-detail-body">
+    <div class="home-body has-bottom-nav">
+  <div class="food-detail-container"
+       data-food-id="{{ food.id }}"
+       data-food-price="{{ food.price }}">
+    <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="{{ food.name }}">
+    <h2>{{ food.name }}</h2>
+    <p class="price">Price: ₹{{ food.price }}</p>
+    <p class="stock">Available: <span id="current-stock">{{ food.stock }}</span></p>
+
+    <label for="qty">Quantity</label>
+    <input type="number" id="qty" value="1" min="1" max="{{ food.stock }}">
+
+    <div class="food-actions">
+      <button onclick="addToCart()">Add to Cart</button>
+      <button onclick="openReviewPopup()">Order Now</button>
+    </div>
+  </div>
+
+  <div id="review-popup" class="popup">
+    <div class="popup-content">
+      <h3>Confirm Order</h3>
+      <img src="{{ url_for('static', filename='uploads/' + food.image) }}" width="100%" alt="{{ food.name }}">
+      <p>{{ food.name }} - ₹{{ food.price }}</p>
+      <label>Quantity:
+        <input type="number" id="order-qty" value="1" min="1" max="{{ food.stock }}" oninput="calculateTotal()">
+      </label>
+      <p>Total: ₹<span id="total">{{ food.price }}</span></p>
+      <button onclick="confirmOrder()">Confirm</button>
+      <button onclick="closeReviewPopup()">Cancel</button>
+    </div>
+  </div>
+
+  <script>
+    function getFoodDetails() {
+      const container = document.querySelector('.food-detail-container');
+      const currentStock = parseInt(document.getElementById('current-stock').innerText);
+      return {
+        foodId: parseInt(container.dataset.foodId),
+        foodPrice: parseFloat(container.dataset.foodPrice),
+        qtyInput: document.getElementById("qty"),
+        orderQtyInput: document.getElementById("order-qty"),
+        currentStock: currentStock
+      };
+    }
+
+    function updateStockDisplay(newStock) {
+        const { qtyInput, orderQtyInput } = getFoodDetails();
+        document.getElementById('current-stock').innerText = newStock;
+        qtyInput.max = newStock;
+        orderQtyInput.max = newStock;
+
+        // Disable buttons if stock is zero
+        const addToCartBtn = document.querySelector('.food-actions button:nth-child(1)');
+        const orderNowBtn = document.querySelector('.food-actions button:nth-child(2)');
+        if (newStock <= 0) {
+            addToCartBtn.disabled = true;
+            orderNowBtn.disabled = true;
+            document.getElementById('qty').disabled = true;
+        } else {
+            addToCartBtn.disabled = false;
+            orderNowBtn.disabled = false;
+            document.getElementById('qty').disabled = false;
+        }
+    }
+
+
+    function fetchLiveStockForDetail() {
+        const { foodId } = getFoodDetails();
+        fetch('/api/live-stock')
+            .then(res => res.json())
+            .then(data => {
+                if (data[foodId] !== undefined) {
+                    updateStockDisplay(data[foodId]);
+                }
+            });
+    }
+
+    function openReviewPopup() {
+      const { qtyInput, currentStock } = getFoodDetails();
+      const orderQty = parseInt(qtyInput.value);
+
+      if (orderQty <= 0 || orderQty > currentStock) {
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'error',
+              title: `Invalid quantity (${orderQty}) or not enough stock (${currentStock})!`,
+              showConfirmButton: false,
+              timer: 2500,
+              timerProgressBar: true
+          });
+          return;
+      }
+
+      document.getElementById("review-popup").style.display = "flex";
+      document.getElementById("order-qty").value = orderQty;
+      calculateTotal();
+    }
+
+    function closeReviewPopup() {
+      document.getElementById("review-popup").style.display = "none";
+    }
+
+    function calculateTotal() {
+      const { foodPrice, orderQtyInput } = getFoodDetails();
+      const total = (parseInt(orderQtyInput.value) || 1) * foodPrice;
+      document.getElementById("total").innerText = total.toFixed(2);
+    }
+
+   // In food_detail.html
+
+function confirmOrder() {
+    const container = document.querySelector('.food-detail-container');
+    const foodId = parseInt(container.dataset.foodId);
+    const quantity = parseInt(document.getElementById('qty').value);
+    const price = parseFloat(container.dataset.foodPrice);
+
+    initiatePayment('/order/single', {
+        food_id: foodId,
+        quantity: quantity,
+        price: price
+    });
+}
+// Add the new initiatePayment function here (see below)
+async function initiatePayment(orderUrl, orderData) {
+    try {
+        // 1. Call backend to generate Razorpay Order (no DB save here)
+        const response = await fetch(orderUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(orderData)
+        });
+
+        const data = await response.json();
+        if (!data.success || !data.razorpay_order_id) {
+            throw new Error(data.error || 'Could not create Razorpay order.');
+        }
+
+        // 2. Configure Razorpay options (still no DB save!)
+        const options = {
+            key: data.key_id,
+            amount: data.amount,
+            currency: "INR",
+            name: "CampusBites",
+            description: "Payment for your CampusBites order",
+            order_id: data.razorpay_order_id,
+            prefill: {
+                name: data.user_name || "Customer"
+            },
+            theme: {
+                color: "#F97316"
+            },
+            handler: function (response) {
+                // Razorpay confirms payment success (async webhook will save to DB)
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Payment Successful!',
+                    text: 'Your payment was successful. Your order is now confirmed.',
+                    confirmButtonText: 'View My Orders'
+                }).then(() => {
+                    window.location.href = '/orders';
+                });
+            },
+            modal: {
+                ondismiss: function () {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Payment Cancelled',
+                        text: 'Your payment was not completed. No order was placed.',
+                        confirmButtonText: 'OK'
+                    });
+                }
+            }
+        };
+
+        const rzp = new Razorpay(options);
+        rzp.open();
+
+        rzp.on('payment.failed', function (response) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Payment Failed',
+                text: response.error.description || 'Payment was not successful.',
+            });
+        });
+
+    } catch (err) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Error',
+            text: err.message || 'Something went wrong.',
+        });
+    }
+}
+
+
+async function addToCart() {
+  const { foodId, qtyInput, currentStock } = getFoodDetails();
+  const qty = parseInt(qtyInput.value);
+
+  if (qty <= 0 || qty > currentStock) {
+      Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'error',
+          title: 'Invalid quantity or not enough stock!',
+          showConfirmButton: false,
+          timer: 2500,
+          timerProgressBar: true
+      });
+      return;
+  }
+
+  try {
+      const response = await fetch('/cart/add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ food_id: foodId, quantity: qty })
+      });
+
+      // Crucial: Check if response is JSON or HTML
+      const contentType = response.headers.get("content-type");
+      let data;
+      if (contentType && contentType.includes("application/json")) {
+          data = await response.json();
+      } else {
+          const errorText = await response.text();
+          console.error('Expected JSON, got HTML. Raw response:', errorText);
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'error',
+              title: `Server error: Unexpected response. (Status: ${response.status})`,
+              text: 'Please check console for more details.',
+              showConfirmButton: true,
+              timer: 5000,
+              timerProgressBar: true
+          });
+          return;
+      }
+
+
+      if (response.ok && data.success) {
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'success',
+              title: 'Added to cart!',
+              showConfirmButton: false,
+              timer: 2000
+          });
+      } else {
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'error',
+              title: data.error || `Failed to add to cart! Status: ${response.status}`,
+              showConfirmButton: false,
+              timer: 2500
+          });
+      }
+  } catch (error) {
+      console.error('Error during addToCart fetch:', error);
+      Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'error',
+          title: 'Network error or server issue!',
+          showConfirmButton: false,
+          timer: 2500
+      });
+  }
+}
+
+    // Initial fetch and set interval for live stock updates on this page
+    window.onload = function() {
+        fetchLiveStockForDetail();
+        setInterval(fetchLiveStockForDetail, 10000); // Poll every 10 seconds
+    };
+
+  </script>
+      <!-- MOBILE BOTTOM NAVIGATION -->
+    <nav class="bottom-nav">
+        <a href="{{ url_for('home') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Home</span>
+        </a>
+        <a href="{{ url_for('cart') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+            <span>Cart</span>
+        </a>
+        <a href="{{ url_for('orders') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Orders</span>
+        </a>
+        <a href="{{ url_for('settings') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Settings</span>
+        </a>
+    </nav>
+</div>
+</body>
+</html>

@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Your Cart - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body class="cart-list">
+<div class="home-body has-bottom-nav">
+  <h2 style="text-align:center">Your Cart</h2>
+
+  {% for item in cart_items %}
+    <div class="cart-item" data-id="{{ item.id }}" data-food-id="{{ item.food_id }}">
+      <img src="{{ url_for('static', filename='uploads/' + item.image) }}" alt="{{ item.name }}">
+      <div class="info">
+        <h4>{{ item.name }}</h4>
+        <p>₹{{ item.price }}</p>
+        <div class="qty-box">
+          <button onclick="updateQty('{{ item.id | int }}', 'decrease')">-</button>
+          <span id="qty-{{ item.id }}">{{ item.quantity }}</span>
+          <button onclick="updateQty('{{ item.id | int }}', 'increase')">+</button>
+        </div>
+        <button class="remove-btn" onclick="removeFromCart('{{ item.id | int }}')">Remove</button>
+      </div>
+    </div>
+  {% endfor %}
+
+  {% if cart_items %}
+    <button class="order-btn" onclick="orderAll()">Order All</button>
+  {% else %}
+    <p style="text-align:center;margin-top:2rem;" id="empty-cart-message">Your cart is empty</p>
+  {% endif %}
+
+  <script>
+    let liveStocks = {};
+
+    function fetchCartLiveStock() {
+        fetch('/api/live-stock')
+            .then(res => res.json())
+            .then(data => {
+                liveStocks = data;
+                document.querySelectorAll('.cart-item').forEach(cartItemDiv => {
+                    const foodId = String(cartItemDiv.dataset.foodId);
+                    const currentQtySpan = cartItemDiv.querySelector(`span[id^="qty-"]`);
+                    const increaseBtn = cartItemDiv.querySelector('.qty-box button:last-child');
+                    const decreaseBtn = cartItemDiv.querySelector('.qty-box button:first-child');
+                    const currentCartQty = parseInt(currentQtySpan.innerText);
+
+                    const availableStockValue = liveStocks[foodId];
+                    const stockForToday = parseInt(availableStockValue || 0);
+
+                    if (availableStockValue === undefined) {
+                        Swal.fire({
+                            toast: true,
+                            position: 'top-end',
+                            icon: 'error',
+                            title: `${cartItemDiv.querySelector('h4').innerText} is not available on today's menu. Consider removing.`,
+                            showConfirmButton: false,
+                            timer: 3000,
+                            timerProgressBar: true
+                        });
+                        increaseBtn.disabled = true;
+                        decreaseBtn.disabled = (currentCartQty <= 1);
+                    }
+                    else if (stockForToday <= 0 && currentCartQty > 0) {
+                         Swal.fire({
+                            toast: true,
+                            position: 'top-end',
+                            icon: 'error',
+                            title: `${cartItemDiv.querySelector('h4').innerText} is currently out of stock. Consider removing.`,
+                            showConfirmButton: false,
+                            timer: 3000,
+                            timerProgressBar: true
+                        });
+                        increaseBtn.disabled = true;
+                        decreaseBtn.disabled = (currentCartQty <= 1);
+                    }
+                    else if (currentCartQty > stockForToday && stockForToday > 0) {
+                        Swal.fire({
+                            toast: true,
+                            position: 'top-end',
+                            icon: 'warning',
+                            title: `Quantity for ${cartItemDiv.querySelector('h4').innerText} might be adjusted due to low stock (${stockForToday} left).`,
+                            showConfirmButton: false,
+                            timer: 3000,
+                            timerProgressBar: true
+                        });
+                        increaseBtn.disabled = true;
+                        decreaseBtn.disabled = (currentCartQty <= 1);
+                    } else {
+                        increaseBtn.disabled = (currentCartQty >= stockForToday);
+                        decreaseBtn.disabled = (currentCartQty <= 1);
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching live stock:', error);
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'error',
+                    title: 'Could not load live stock data. Please refresh.',
+                    showConfirmButton: false,
+                    timer: 3000,
+                    timerProgressBar: true
+                });
+            });
+    }
+
+    window.onload = fetchCartLiveStock;
+    setInterval(fetchCartLiveStock, 10000);
+
+
+    function updateQty(cartItemId, action) {
+      const foodId = String(document.querySelector(`.cart-item[data-id="${cartItemId}"]`).dataset.foodId);
+      const currentQtySpan = document.getElementById(`qty-${cartItemId}`);
+      const currentCartQty = parseInt(currentQtySpan.innerText);
+      const stockForToday = parseInt(liveStocks[foodId] || 0);
+
+      let newQty = currentCartQty;
+      if (action === 'increase') {
+          newQty++;
+      } else {
+          newQty--;
+      }
+
+      if (newQty < 1) {
+          return;
+      }
+      if (newQty > stockForToday) {
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'warning',
+              title: `Only ${stockForToday} available for this item.`,
+              showConfirmButton: false,
+              timer: 2000,
+              timerProgressBar: true
+          });
+          return;
+      }
+
+      fetch('/cart/update', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+              cart_item_id: parseInt(cartItemId),
+              action: action
+          })
+      }).then(res => {
+          // Changed to handle empty 204 response for success
+          if (res.status === 204) { // Success, no content
+              currentQtySpan.innerText = newQty;
+              fetchCartLiveStock();
+          } else if (res.status === 401) { // Unauthorized, should be handled by fetch
+              Swal.fire({
+                  toast: true,
+                  position: 'top-end',
+                  icon: 'error',
+                  title: 'Session expired. Please log in again.',
+                  showConfirmButton: false,
+                  timer: 2000,
+                  timerProgressBar: true
+              }).then(() => {
+                  window.location.href = '/login';
+              });
+          }
+          else {
+              res.json().then(data => { // Try to parse error JSON if not 204/401
+                  Swal.fire({
+                      toast: true,
+                      position: 'top-end',
+                      icon: 'error',
+                      title: data.error || `Error updating quantity! Status: ${res.status}`,
+                      showConfirmButton: false,
+                      timer: 2500,
+                      timerProgressBar: true
+                  });
+              }).catch(() => { // Fallback if not JSON
+                  Swal.fire({
+                      toast: true,
+                      position: 'top-end',
+                      icon: 'error',
+                      title: `Unexpected server error! Status: ${res.status}`,
+                      showConfirmButton: false,
+                      timer: 2500,
+                      timerProgressBar: true
+                  });
+              });
+          }
+      }).catch(error => {
+          console.error('Error updating cart quantity:', error);
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'error',
+              title: 'Network error or server issue!',
+              showConfirmButton: false,
+              timer: 2000,
+              timerProgressBar: true
+          });
+      });
+    }
+
+    function removeFromCart(cartItemId) {
+      fetch('/cart/remove', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          cart_item_id: parseInt(cartItemId)
+        })
+      }).then(res => {
+          if (res.status === 204) {
+              window.location.reload();
+          } else if (res.status === 401) {
+              Swal.fire({
+                  toast: true,
+                  position: 'top-end',
+                  icon: 'error',
+                  title: 'Session expired. Please log in again.',
+                  showConfirmButton: false,
+                  timer: 2000,
+                  timerProgressBar: true
+              }).then(() => {
+                  window.location.href = '/login';
+              });
+          }
+          else {
+              res.json().then(data => {
+                  Swal.fire({
+                      toast: true,
+                      position: 'top-end',
+                      icon: 'error',
+                      title: data.error || `Error removing item! Status: ${res.status}`,
+                      showConfirmButton: false,
+                      timer: 2000,
+                      timerProgressBar: true
+                  });
+              }).catch(() => {
+                  Swal.fire({
+                      toast: true,
+                      position: 'top-end',
+                      icon: 'error',
+                      title: `Unexpected server error! Status: ${res.status}`,
+                      showConfirmButton: false,
+                      timer: 2000,
+                      timerProgressBar: true
+                  });
+              });
+          }
+      }).catch(error => {
+          console.error('Error removing item from cart:', error);
+          Swal.fire({
+              toast: true,
+              position: 'top-end',
+              icon: 'error',
+              title: 'Network error or server issue!',
+              showConfirmButton: false,
+              timer: 2000,
+              timerProgressBar: true
+          });
+      });
+    }
+
+    // In cart.html
+
+function orderAll() {
+    initiatePayment('/cart/order', {});
+}
+// Add the new initiatePayment function here (see below)
+async function initiatePayment(orderUrl, orderData) {
+    try {
+        // 1. Call your backend to create the order
+        const response = await fetch(orderUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(orderData)
+        });
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to create order.');
+        }
+
+        // 2. Configure Razorpay Checkout options
+        const options = {
+            key: data.key_id,
+            amount: data.amount,
+            currency: "INR",
+            name: "CampusBites",
+            description: `Payment for Order #${data.order_id}`,
+            order_id: data.razorpay_order_id,
+            handler: function (response) {
+                // This function is called after a successful payment
+                Swal.fire({
+                    icon: 'success',
+                    title: 'Payment Successful!',
+                    text: 'Your order has been confirmed.',
+                    confirmButtonText: 'View My Orders'
+                }).then(() => {
+                    window.location.href = '/orders';
+                });
+            },
+            prefill: {
+                name: data.user_name,
+            },
+            theme: {
+                color: "#F97316" // Your brand color
+            },
+            "modal": {
+                "ondismiss": function(){
+                    // This function is called if the user closes the modal without paying
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Payment Cancelled',
+                        text: 'Your order was created but is unpaid. You can complete the payment from your Orders page.',
+                    });
+                }
+            }
+        };
+
+        // 3. Create a new Razorpay instance and open the payment modal
+        const rzp = new Razorpay(options);
+        rzp.open();
+
+        rzp.on('payment.failed', function (response){
+            Swal.fire({
+                icon: 'error',
+                title: 'Payment Failed',
+                text: response.error.description,
+            });
+        });
+
+    } catch (error) {
+        Swal.fire({
+            icon: 'error',
+            title: 'Oops...',
+            text: error.message,
+        });
+    }
+}
+
+  </script>
+      <!-- MOBILE BOTTOM NAVIGATION -->
+    <nav class="bottom-nav">
+        <a href="{{ url_for('home') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Home</span>
+        </a>
+        <a href="{{ url_for('cart') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+            <span>Cart</span>
+        </a>
+        <a href="{{ url_for('orders') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Orders</span>
+        </a>
+        <a href="{{ url_for('settings') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Settings</span>
+        </a>
+    </nav>
+</div>
+</body>
+</html>

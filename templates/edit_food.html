@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Edit Food - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .form-container {
+      max-width: 500px;
+      margin: 2rem auto;
+      background: #fff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    .form-container h2 {
+      color: #ff7f50;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 0.4rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.8rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+    }
+
+    button {
+      background-color: #ff7f50;
+      color: white;
+      border: none;
+      padding: 0.9rem 1.5rem;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background-color: #ff5722;
+    }
+  </style>
+</head>
+<body class="home-body has-bottom-nav">
+  <div class="form-container">
+    <h2>Edit Food</h2>
+    <form method="POST" enctype="multipart/form-data">
+      <div class="form-group">
+        <label for="name">Food Name</label>
+        <input type="text" name="name" id="name" value="{{ food.name }}" required />
+      </div>
+
+      <div class="form-group">
+        <label for="price">Price (₹)</label>
+        <input type="number" name="price" id="price" step="0.01" value="{{ food.price }}" required />
+      </div>
+
+      <div class="form-group">
+        <label for="category">Category</label>
+        <select name="category" id="category" required>
+          <option value="breakfast" {% if food.category == 'breakfast' %}selected{% endif %}>Breakfast</option>
+          <option value="lunch" {% if food.category == 'lunch' %}selected{% endif %}>Lunch</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label for="about">About</label>
+        <textarea name="about" id="about" rows="3">{{ food.about }}</textarea>
+      </div>
+
+      <div class="form-group">
+    <label for="current-image">Current Image</label><br>
+    <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="Current Image" style="max-height: 100px; border-radius: 8px;"> {# CHANGED LINE HERE #}
+  </div>
+
+  <div class="form-group">
+    <label for="image">Change Image (Optional)</label>
+    <input type="file" name="image" id="image" accept="image/*" />
+  </div>
+
+      <div class="form-group">
+        <label for="available">Availability</label>
+        <select name="available" id="available">
+          <option value="1" {% if food.available == 1 %}selected{% endif %}>Available</option>
+          <option value="0" {% if food.available == 0 %}selected{% endif %}>Not Available</option>
+        </select>
+      </div>
+
+      <button type="submit">Save Changes</button>
+    </form>
+  </div>
+
+</body>
+</html>

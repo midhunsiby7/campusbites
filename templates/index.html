@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body class="home-body">
+  <div class="home-body has-bottom-nav">
+    <header class="main-header">
+    <div class="header-left">
+      <img src="{{ url_for('static', filename='images/logo.png') }}" alt="CAMPUSBITES Logo" class="logo-icon" />
+    </div>
+    <div class="header-right">
+      <h1 class="app-title">CAMPUSBITES</h1>
+    </div>
+  </header>
+
+  <main class="food-grid">
+    {% if not foods %}
+  <p style="text-align:center; width: 100%; margin-top: 2rem;">No food items available right now. Please check back later.</p>
+{% endif %}
+
+    {% for food in foods %}
+    <div class="food-item" onclick="location.href='/food/{{ food.id }}'" data-food-id="{{ food.id }}">
+      <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="{{ food.name }}">
+      <h4>{{ food.name }}</h4>
+      <p>₹{{ food.price }}</p>
+      <p><strong>Available:</strong> <span class="stock-count">{{ food.stock }}</span></p>
+    </div>
+  {% endfor %}
+  </main>
+  <script>
+  function fetchLiveStock() {
+    fetch('/api/live-stock')
+      .then(res => res.json())
+      .then(data => {
+        for (let foodId in data) {
+          const stockElement = document.querySelector(`.food-item[data-food-id="${foodId}"] .stock-count`);
+          if (stockElement) {
+            stockElement.innerText = data[foodId];
+            if (data[foodId] <= 0) {
+                const foodItem = document.querySelector(`.food-item[data-food-id="${foodId}"]`);
+                if (foodItem) {
+                    foodItem.style.opacity = '0.5';
+                    foodItem.style.pointerEvents = 'none';
+                }
+            } else {
+                const foodItem = document.querySelector(`.food-item[data-food-id="${foodId}"]`);
+                if (foodItem) {
+                    foodItem.style.opacity = '1';
+                    foodItem.style.pointerEvents = 'auto';
+                }
+            }
+          }
+        }
+      });
+  }
+
+  setInterval(fetchLiveStock, 10000);
+  window.onload = fetchLiveStock;
+
+  // --- START OF MODIFICATION: User Notifications ---
+  function checkUserNotifications() {
+    fetch('/api/check-user-notifications')
+        .then(res => {
+            if (!res.ok) {
+                console.error('Failed to fetch user notifications API:', res.status, res.statusText);
+                return { has_notification: false };
+            }
+            return res.json();
+        })
+        .then(data => {
+            if (data.has_notification) {
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: data.type === 'confirmed_order' ? 'success' : 'info',
+                    title: data.message,
+                    showConfirmButton: false,
+                    timer: 8000, // Increased timer duration
+                    timerProgressBar: true,
+                    didOpen: (toast) => {
+                        toast.addEventListener('mouseenter', Swal.stopTimer);
+                        toast.addEventListener('mouseleave', Swal.resumeTimer);
+                        const audio = new Audio('/static/notification_user.mp3'); 
+                        audio.play().catch(e => console.error("Error playing user notification audio:", e));
+                    }
+                });
+            }
+        })
+        .catch(error => {
+            console.error('Network error during checkUserNotifications:', error);
+        });
+  }
+
+  setInterval(checkUserNotifications, 5000); 
+  document.addEventListener('DOMContentLoaded', checkUserNotifications);
+  // --- END OF MODIFICATION ---
+
+</script>
+    <!-- MOBILE BOTTOM NAVIGATION -->
+    <nav class="bottom-nav">
+        <a href="{{ url_for('home') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span>Home</span>
+        </a>
+        <a href="{{ url_for('cart') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+            <span>Cart</span>
+        </a>
+        <a href="{{ url_for('orders') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Orders</span>
+        </a>
+        <a href="{{ url_for('settings') }}">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 0 2l-.15.08a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1 0-2l.15-.08a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Settings</span>
+        </a>
+    </nav>
+</div>
+</body>
+</html>

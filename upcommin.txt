@@ -1,0 +1,20 @@
+import schedule
+import threading
+import time
+# Background daily scheduler thread
+import pytz
+from datetime import datetime
+
+def daily_task():
+    ist = pytz.timezone("Asia/Kolkata")
+
+    def run_if_midnight_ist():
+        now_ist = datetime.now(ist)
+        if now_ist.hour == 0 and now_ist.minute == 0:
+            _daily_cleanup_and_reset_at_startup()
+
+    while True:
+        run_if_midnight_ist()
+        time.sleep(60)  # check every minute
+# Start the daily task thread
+threading.Thread(target=daily_task, daemon=True).start()

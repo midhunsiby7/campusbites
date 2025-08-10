@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Today's Menu - Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+</head>
+<body class="admin-body">
+
+  <header class="admin-header">
+    <h1>Today's Menu</h1>
+    <nav class="admin-nav">
+      <a href="{{ url_for('admin_dashboard') }}" class="admin-nav-btn">Dashboard</a>
+      <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
+      <form action="{{ url_for('admin_logout') }}" method="POST" class="logout-form">
+        <button type="submit" class="logout-btn">Logout</button>
+      </form>
+    </nav>
+  </header>
+
+  <!-- ... (HEAD & HEADER SAME) ... -->
+<main class="admin-main">
+  {% if today_menu %}
+    <!-- ✅ CURRENT MENU DISPLAY -->
+    <div class="current-menu-container">
+      <h2>Current Menu for Today</h2>
+      {% for category, items in today_menu.items() %}
+      <div class="menu-category-display card">
+        <h3>{{ category.capitalize() }}</h3>
+        {% if category == 'breakfast' and breakfast_times.start %}
+          <p class="time-display">Serving from {{ breakfast_times.start.strftime('%I:%M %p') }} to {{ breakfast_times.end.strftime('%I:%M %p') }}</p>
+        {% elif category == 'lunch' and lunch_times.start %}
+          <p class="time-display">Serving from {{ lunch_times.start.strftime('%I:%M %p') }} to {{ lunch_times.end.strftime('%I:%M %p') }}</p>
+        {% endif %}
+        <ul class="item-list">
+          {% for item in items %}
+          <li>{{ item.name }} <span>Stock: {{ item.stock }}</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endfor %}
+
+      <div class="menu-actions">
+        <a href="{{ url_for('admin_todays_menu', edit='true') }}" class="btn">Edit Menu</a>
+        <form action="/admin/todays-menu?action=delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the entire menu for today?');">
+          <button type="submit" class="btn btn-danger">Delete Menu</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- ✅ SHOW EDIT MENU FORM ONLY IF ?edit=true -->
+    {% if request.args.get('edit') == 'true' %}
+    <div id="edit-menu-form" class="form-container menu-form">
+      <h2>Edit Today's Menu</h2>
+      <form method="POST" action="/admin/todays-menu?action=edit">
+        <!-- Time Settings -->
+        <div class="time-inputs">
+          <div>
+            <label>Breakfast Time (Start - End)</label>
+            <input type="time" name="breakfast_start" value="{{ breakfast_times.start.strftime('%H:%M') if breakfast_times.start else default_breakfast_start }}">
+            <input type="time" name="breakfast_end" value="{{ breakfast_times.end.strftime('%H:%M') if breakfast_times.end else default_breakfast_end }}">
+          </div>
+          <div>
+            <label>Lunch Time (Start - End)</label>
+            <input type="time" name="lunch_start" value="{{ lunch_times.start.strftime('%H:%M') if lunch_times.start else default_lunch_start }}">
+            <input type="time" name="lunch_end" value="{{ lunch_times.end.strftime('%H:%M') if lunch_times.end else default_lunch_end }}">
+          </div>
+        </div>
+
+        <!-- Edit Existing Items -->
+        <h3>Edit Stock for Current Items</h3>
+        <div class="food-selection-grid">
+          {% for category, items in today_menu.items() %}
+            {% for item in items %}
+            <div class="food-check-item">
+              <label for="stock_{{ item.food_id }}">{{ item.name }}</label>
+              <input type="number" name="stock_{{ item.food_id }}" value="{{ item.stock }}" min="0">
+            </div>
+            {% endfor %}
+          {% endfor %}
+        </div>
+
+        <!-- Add New Items -->
+        {% if foods_not_on_menu %}
+        <h3>Add More Items</h3>
+        <div class="food-selection-grid">
+          {% for food in foods_not_on_menu %}
+          <div class="food-check-item">
+            <input type="checkbox" name="new_food_ids" value="{{ food.id }}" id="add_food_{{ food.id }}">
+            <label for="add_food_{{ food.id }}">{{ food.name }} ({{ food.category|capitalize }})</label>
+            <input type="number" name="stock_new_{{ food.id }}" value="10" min="1">
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary btn-full">Update Menu</button>
+      </form>
+    </div>
+    {% endif %}
+
+  {% else %}
+    <!-- ✅ SET MENU FOR TODAY IF EMPTY -->
+    <div class="form-container menu-form">
+      <h2>Set Menu for Today</h2>
+      <form method="POST" action="/admin/todays-menu?action=set">
+        <div class="time-inputs">
+          <div>
+            <label>Breakfast Time (Start - End)</label>
+            <input type="time" name="breakfast_start" value="{{ default_breakfast_start }}">
+            <input type="time" name="breakfast_end" value="{{ default_breakfast_end }}">
+          </div>
+          <div>
+            <label>Lunch Time (Start - End)</label>
+            <input type="time" name="lunch_start" value="{{ default_lunch_start }}">
+            <input type="time" name="lunch_end" value="{{ default_lunch_end }}">
+          </div>
+        </div>
+
+        <h3>Select Breakfast Items</h3>
+        <div class="food-selection-grid">
+          {% for food in foods if food.category == 'breakfast' %}
+          <div class="food-check-item">
+            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}">
+            <label for="food_{{ food.id }}">{{ food.name }}</label>
+            <input type="number" name="stock_{{ food.id }}" value="10" min="1">
+          </div>
+          {% endfor %}
+        </div>
+
+        <h3>Select Lunch Items</h3>
+        <div class="food-selection-grid">
+          {% for food in foods if food.category == 'lunch' %}
+          <div class="food-check-item">
+            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}">
+            <label for="food_{{ food.id }}">{{ food.name }}</label>
+            <input type="number" name="stock_{{ food.id }}" value="10" min="1">
+          </div>
+          {% endfor %}
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-full">Set Today's Menu</button>
+      </form>
+    </div>
+  {% endif %}
+</main>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    if (window.location.search.includes("edit=true")) {
+      const form = document.getElementById("edit-menu-form");
+      if (form) form.scrollIntoView({ behavior: "smooth" });
+    }
+  });
+</script>
+</body>
+</html>

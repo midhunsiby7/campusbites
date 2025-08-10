@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Order Details - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .order-detail {
+      max-width: 600px;
+      margin: 2rem auto;
+      background: #fff;
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .order-detail h2 {
+      color: #ff7f50;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    .order-info p {
+      margin: 0.3rem 0;
+    }
+
+    .items-list {
+      margin-top: 1rem;
+      border-top: 1px solid #ddd;
+      padding-top: 1rem;
+    }
+
+    .items-list h3 {
+      margin-bottom: 0.5rem;
+      font-size: 1.1rem;
+    }
+
+    .items-list ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .items-list li {
+      padding: 0.5rem 0;
+      border-bottom: 1px solid #f0f0f0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .items-list li img {
+        width: 40px; /* Fixed width for consistency after cropping */
+        height: 40px; /* Fixed height for consistency after cropping */
+        object-fit: cover;
+        border-radius: 4px;
+    }
+
+    .mark-btn {
+      margin-top: 1.5rem;
+      width: 100%;
+      padding: 0.9rem;
+      font-weight: bold;
+      background: green;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .mark-btn.confirm {
+        background: #ff7f50;
+    }
+    .mark-btn.deliver {
+        background: #4caf50;
+    }
+
+
+    .mark-btn:disabled {
+      background: gray;
+      cursor: not-allowed;
+    }
+
+    .back-link {
+      display: inline-block;
+      margin-top: 1.2rem;
+      text-align: center;
+      color: #555;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body class="home-body has-bottom-nav">
+  <div class="order-detail">
+    <h2>Order #{{ order.order_id }}</h2>
+
+    <div class="order-info">
+      <p><strong>Token:</strong> {{ order.token_number }}</p>
+      <p><strong>User:</strong> {{ order.user_name }} ({{ order.admission_number }})</p>
+      <p><strong>Status:</strong> {{ order.status }}</p>
+      <p><strong>Total:</strong> ₹{{ order.total }}</p>
+      <p><strong>Time:</strong> {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+    </div>
+
+    <div class="items-list">
+      <h3>Items</h3>
+      <ul>
+        {% for item in items %}
+        <li>
+            {% if item.food_image %}
+                <img src="{{ url_for('static', filename='uploads/' + item.food_image) }}" alt="{{ item.food_name }}">
+            {% endif %}
+            {{ item.food_name }} × {{ item.quantity }} — ₹{{ item.quantity * item.price }}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    {# Conditional buttons based on order status and confirmability #}
+    {% if order.status == 'pending' %}
+        {% if is_confirmable_now %}
+            <form method="POST" action="{{ url_for('confirm_order', order_id=order.order_id) }}">
+                <button type="submit" class="mark-btn confirm">Confirm Order</button>
+            </form>
+        {% else %}
+            <button class="mark-btn" disabled>Awaiting user cancellation window (10 mins)</button>
+        {% endif %}
+    {% elif order.status == 'confirmed' %}
+        <form method="POST" action="{{ url_for('mark_delivered', order_id=order.order_id) }}">
+            <button type="submit" class="mark-btn deliver">Mark as Delivered</button>
+        </form>
+    {% else %} {# delivered or collected #}
+      <button class="mark-btn" disabled>Already {{ order.status|capitalize }}</button>
+    {% endif %}
+
+    <div style="text-align:center;">
+      <a class="back-link" href="{{ url_for('admin_dashboard') }}">← Back to Dashboard</a>
+    </div>
+  </div>
+
+  <script>
+    // Auto-refresh the page every 15 seconds for live status updates
+    setInterval(function() {
+        location.reload();
+    }, 15000);
+  </script>
+
+</body>
+</html>

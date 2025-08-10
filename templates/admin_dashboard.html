@@ -1,0 +1,238 @@
+<!-- admin_dashboard.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Admin Dashboard - CampusBites</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+</head>
+<body class="admin-body">
+  <header class="admin-header">
+    <h1 class="admin-title">Admin Dashboard</h1>
+    <nav class="admin-nav">
+      <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
+      <a href="{{ url_for('admin_todays_menu') }}" class="admin-nav-btn">Menu</a>
+      <a href="{{ url_for('scan_qr') }}" class="admin-nav-btn">Scan QR</a>
+      <button class="admin-nav-btn" onclick="openUncollectedTokensPopup()">Uncollected Tokens</button>
+      <form action="{{ url_for('admin_logout') }}" method="POST" class="logout-form">
+        <button type="submit" class="logout-btn">Logout</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <form method="get" action="/admin/dashboard" class="admin-filter-form">
+      <div class="filter-row">
+        <select name="status" id="statusFilter">
+          <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
+          <option value="paid" {% if selected_status == 'paid' %}selected{% endif %}>Paid</option>
+          <option value="confirmed" {% if selected_status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+          <option value="delivered" {% if selected_status == 'delivered' %}selected{% endif %}>Delivered</option>
+          <option value="collected" {% if selected_status == 'collected' %}selected{% endif %}>Collected</option>
+          <option value="cancelled" {% if selected_status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+        </select>
+        <select name="sort" id="sortSelect">
+          <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>Newest First</option>
+          <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>Oldest First</option>
+        </select>
+      </div>
+      <div class="filter-row">
+        <input type="text" name="search" id="searchInput" placeholder="Search by name or token...">
+        <button type="submit" id="applyFilterBtn">Apply</button>
+      </div>
+    </form>
+
+    <div class="orders-wrapper">
+      {% for order in orders %}
+      <div class="order-card" data-id="{{ order.id }}" data-status="{{ order.status }}">
+        <div class="order-header">
+          <div>
+            <strong>#{{ order.token_number }}</strong>
+            <small>Order ID: {{ order.id }}</small>
+          </div>
+          {% if order.status == 'confirmed' and order.payment_status == 'paid' %}
+    <span class="badge status-badge">Confirmed and Paid</span>
+{% else %}
+    <span class="badge status-badge">{{ order.status|capitalize }}</span>
+{% endif %}
+
+        </div>
+        <div class="order-body">
+          <p><strong>User:</strong> {{ order.user_name }}</p>
+          <p><strong>Total:</strong> ₹{{ order.total }}</p>
+          <p><strong>Time:</strong> {{ order.created_at.strftime('%d %b, %I:%M %p') if order.created_at else 'N/A' }}</p>
+          {% if order.time_ago %}<p class="ago">({{ order.time_ago }})</p>{% endif %}
+        </div>
+        <div class="order-actions">
+          <a href="{{ url_for('admin_view_order', order_id=order.id) }}" class="btn">View</a>
+          {% if order.status == 'paid' %}
+            <form action="{{ url_for('admin_confirm_order', order_id=order.id) }}" method="post">
+              <button type="submit" class="action-btn confirm">Confirm</button>
+            </form>
+          {% elif order.status == 'confirmed' %}
+            <form action="{{ url_for('mark_delivered', order_id=order.id) }}" method="post">
+              <button type="submit" class="action-btn deliver">Deliver</button>
+            </form>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </main>
+</body>
+</html>
+
+
+
+
+  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+  <script>
+  const socket = io();
+
+  socket.on('new_notification', function(data) {
+    // Show it like a YouTube/WhatsApp style notification
+    showLiveNotification(data.message, data.type);
+  });
+
+  function showLiveNotification(msg, type) {
+    const notifBox = document.createElement('div');
+    notifBox.className = 'live-notification ' + type;
+    notifBox.innerHTML = msg;
+
+    document.body.appendChild(notifBox);
+
+    setTimeout(() => notifBox.remove(), 4000);
+  }
+
+  const searchInput = document.getElementById("searchInput");
+  const sortSelect = document.getElementById("sortSelect");
+  const statusFilter = document.getElementById("statusFilter");
+
+  if (searchInput) searchInput.addEventListener("input", filterTable);
+  if (sortSelect) sortSelect.addEventListener("change", applyFilters);
+  if (statusFilter) statusFilter.addEventListener("change", applyFilters);
+
+  function filterTable() {
+    const query = searchInput.value.toLowerCase();
+    const status = statusFilter.value;
+
+    const cards = document.querySelectorAll(".order-card");
+    const sorted = Array.from(cards);
+
+    // Apply status & search filters
+    sorted.forEach(card => {
+      const text = card.innerText.toLowerCase();
+      const matchesQuery = text.includes(query);
+      const matchesStatus = status === "all" || card.dataset.status === status;
+      card.style.display = matchesQuery && matchesStatus ? "flex" : "none";
+    });
+  }
+
+  function applyFilters() {
+    filterTable();
+  }
+
+  async function openUncollectedTokensPopup() {
+    const popup = document.getElementById("uncollected-tokens-popup");
+
+    try {
+      const res = await fetch("/admin/uncollected-tokens");
+      const data = await res.json();
+
+      if (!data.length) {
+        Swal.fire("No uncollected tokens found.");
+        return;
+      }
+
+      popup.innerHTML = `
+  <div class="popup-content">
+    <div class="popup-header">
+      Uncollected Tokens
+      <button onclick="closeUncollectedTokensPopup()">Close</button>
+    </div>
+    <div class="token-list">
+      ${data.map(item => `
+        <div class="token-entry">
+          <p><strong>Token #${item.token_number}</strong></p>
+          <p>User: ${item.user_name} (${item.admission_number})</p>
+          <p>Status: ${item.order_status}</p>
+          <p>Date: ${item.order_date}</p>
+          <hr />
+        </div>
+      `).join('')}
+    </div>
+  </div>
+`;
+
+      popup.style.display = "flex";
+    } catch (err) {
+      console.error("Failed to load tokens", err);
+      Swal.fire("Failed to fetch token data.");
+    }
+  }
+
+  function closeUncollectedTokensPopup() {
+    document.getElementById("uncollected-tokens-popup").style.display = "none";
+  }
+
+  let latestOrderId = parseInt(document.querySelector('.order-card')?.dataset.id || '0');
+
+
+  async function liveUpdateDashboard() {
+    try {
+      const response = await fetch(window.location.href);
+      const html = await response.text();
+      const newDoc = new DOMParser().parseFromString(html, 'text/html');
+      const newCards = newDoc.querySelector('.orders-wrapper');
+
+      if (newCards && newCards.children.length > 0) {
+  const newFirstOrder = newCards.querySelector('.order-card');
+  const newFirstOrderId = parseInt(newFirstOrder?.dataset.id || '0');
+
+  if (newFirstOrderId > latestOrderId) {
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'info',
+      title: 'A new order has arrived!',
+      showConfirmButton: false,
+      timer: 4000,
+      didOpen: () => {
+        const audio = new Audio("{{ url_for('static', filename='notification.mp3') }}");
+        audio.play().catch(e => console.error("Audio failed:", e));
+      }
+    });
+    latestOrderId = newFirstOrderId;
+  }
+}
+
+      document.querySelector('.orders-wrapper').innerHTML = newCards.innerHTML;
+      filterTable();
+    } catch (err) {
+      console.error("Live update failed", err);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    filterTable();
+    setInterval(liveUpdateDashboard, 7000);
+  });
+
+  // Store scroll position before unload
+  window.addEventListener("beforeunload", function () {
+    sessionStorage.setItem("scrollPos", window.scrollY);
+  });
+
+  // Scroll to the stored position on load
+  window.addEventListener("load", function () {
+    const scrollPos = sessionStorage.getItem("scrollPos");
+    if (scrollPos !== null) {
+      window.scrollTo(0, parseInt(scrollPos));
+      sessionStorage.removeItem("scrollPos");
+    }
+  });
+</script>
+</body>
+</html>

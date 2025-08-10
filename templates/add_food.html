@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Add New Food - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    .form-container {
+      max-width: 500px;
+      margin: 2rem auto;
+      background: #fff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    }
+
+    .form-container h2 {
+      color: #ff7f50;
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .form-group {
+      margin-bottom: 1rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 0.4rem;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 0.8rem;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      font-size: 1rem;
+    }
+
+    .form-group textarea {
+      resize: vertical;
+    }
+
+    button {
+      background-color: #ff7f50;
+      color: white;
+      border: none;
+      padding: 0.9rem 1.5rem;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      width: 100%;
+      font-weight: bold;
+    }
+
+    button:hover {
+      background-color: #ff5722;
+    }
+  </style>
+</head>
+<body class="home-body has-bottom-nav">
+
+  <div class="form-container">
+    <h2>Add New Food</h2>
+    <form action="/admin/add-food" method="POST" enctype="multipart/form-data">
+  <label for="name">Food Name:</label>
+  <input type="text" name="name" required><br>
+
+  <label for="price">Price:</label>
+  <input type="number" name="price" required><br>
+
+  <label for="category">Category:</label>
+  <select name="category" required>
+    <option value="breakfast">Breakfast</option>
+    <option value="lunch">Lunch</option>
+  </select><br>
+
+  <label for="about">Description:</label>
+  <textarea name="about" rows="3"></textarea><br>
+
+  <label for="image">Food Image:</label>
+  <input type="file" name="image" accept="image/*" required><br><br>
+
+  <button type="submit">Add Food</button>
+</form>
+
+  </div>
+
+</body>
+</html>
