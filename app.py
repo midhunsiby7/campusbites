@@ -1352,5 +1352,5 @@ def orders():
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5055, debug=True)
+    app.run(app, host='0.0.0.0', port=5055, debug=True)
 
