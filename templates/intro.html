@@ -35,12 +35,12 @@
             }
             // --- END OF MODIFICATION ---
           } else {
-            window.location.href = "/firebase-login";
+            window.location.href = "/login";
           }
         })
         .catch(error => {
             console.error("Error checking login status:", error);
-            window.location.href = "/firebase-login"; // Redirect to login on API error
+            window.location.href = "/login"; // Redirect to login on API error
         });
     }, 3000);
   </script>

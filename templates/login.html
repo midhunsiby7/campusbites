@@ -21,83 +21,125 @@
       width: 300px;
       text-align: center;
     }
-    button {
+    button, input {
       margin: 10px 0;
       padding: 10px;
       width: 100%;
       font-size: 16px;
-      border: none;
       border-radius: 5px;
-      cursor: pointer;
+      border: 1px solid #ccc;
     }
     .google-btn {
       background: #4285F4;
       color: white;
+      border: none;
     }
     .email-btn {
       background: #34A853;
       color: white;
+      border: none;
     }
   </style>
 </head>
 <body>
-
 <div class="login-box">
   <h2>Login to CampusBites</h2>
   <button class="google-btn" id="googleLogin">Login with Google</button>
   <hr>
-  <input type="email" id="email" placeholder="Email"><br><br>
-  <input type="password" id="password" placeholder="Password"><br><br>
-  <button class="email-btn" id="emailLogin">Login with Email</button>
+  <input type="email" id="email" placeholder="Email" required>
+  <input type="password" id="password" placeholder="Password" required>
+  <button class="email-btn" id="emailLogin">Login / Register with Email</button>
 </div>
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword } 
+  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword }
     from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-  // Fetch Firebase config from backend
   const config = await fetch("/firebase-config").then(res => res.json());
   const app = initializeApp(config);
   const auth = getAuth(app);
   const googleProvider = new GoogleAuthProvider();
 
-  document.getElementById("googleLogin").addEventListener("click", async () => {
+  document.getElementById("googleLogin").addEventListener("click", async (event) => {
+    event.preventDefault();
     try {
       const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      await sendLoginToBackend(user.email, user.displayName, null);
+      await sendLoginToBackend(result.user.email, result.user.displayName, null);
     } catch (error) {
       alert("Google login failed: " + error.message);
     }
   });
 
-  document.getElementById("emailLogin").addEventListener("click", async () => {
-    const email = document.getElementById("email").value;
-    const password = document.getElementById("password").value;
+  document.getElementById("emailLogin").addEventListener("click", async (event) => {
+    event.preventDefault();
+
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value.trim();
+
+    if (!email || !password) {
+        alert("Please fill in both email & password");
+        return;
+    }
+    if (password.length < 6) {
+    return alert("Password must be at least 6 characters");
+}
+if (!email.includes("@")) {
+    return alert("Invalid email format");
+}
+
+
     try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const user = userCredential.user;
-      await sendLoginToBackend(user.email, null, null);
+        // Try login first
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        const user = userCredential.user;
+        await sendLoginToBackend(user.email, null, null);
     } catch (error) {
-      alert("Email login failed: " + error.message);
-    }
-  });
-
-  async function sendLoginToBackend(email, name, phone) {
-    const res = await fetch("/firebase-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, name, phone_number: phone })
-    });
-    if (res.ok) {
-      window.location.href = "/home";
+        if (error.code === "auth/user-not-found") {
+            // First-time user → register account
+            try {
+                const newUser = await createUserWithEmailAndPassword(auth, email, password);
+                const u = newUser.user;
+                const name = prompt("Enter your name:");
+                const phone = prompt("Enter your phone number:");
+                await sendLoginToBackend(u.email, name, phone);
+            } catch (error) {
+    if (error.code === 'auth/user-not-found') {
+        alert("No account found with this email.");
+    } else if (error.code === 'auth/wrong-password') {
+        alert("Incorrect password.");
+    } else if (error.code === 'auth/email-already-in-use') {
+        alert("Email is already registered.");
     } else {
-      const err = await res.json();
-      alert("Login error: " + err.error);
+        alert(error.message);
     }
-  }
-</script>
+}
 
+        } else {
+            alert("Email login failed: " + error.message);
+        }
+    }
+});
+
+async function sendLoginToBackend(email, name, phone) {
+    const res = await fetch("/firebase-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, name, phone:phone })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+        if (data.need_profile) {
+            window.location.href = "/complete-profile";
+        } else {
+            window.location.href = "/home";
+        }
+    } else {
+        alert("Backend error: " + data.error);
+    }
+}
+
+</script>
 </body>
 </html>

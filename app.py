@@ -283,6 +283,9 @@ def admin_login():
 
 # User Login Page
 
+@app.route("/login")
+def login_page():
+    return render_template("login.html")
 
 
 import hashlib  # if you're using hashlib for hashing
@@ -290,9 +293,15 @@ import hashlib  # if you're using hashlib for hashing
 # Load Firebase public config from file
 @app.route("/firebase-config")
 def firebase_config():
-    with open("serviceAccountKey.json") as f:  # This is the *public* web config JSON
-        config = json.load(f)
-    return jsonify(config)
+    return jsonify({ 
+  "apiKey": "AIzaSyA_uhRgSRZ3FAEByIcy6OiDUDjg9olUepg",
+  "authDomain": "campusbites-964d4.firebaseapp.com",
+  "projectId": "campusbites-964d4",
+  "storageBucket": "campusbites-964d4.firebasestorage.app",
+  "messagingSenderId": "387692591098",
+  "appId": "1:387692591098:web:373218ae5e0eba33491643",
+  "measurementId": "G-JXBZ4H874P"
+    })
 
 # Handle login data from frontend
 @app.route("/firebase-login", methods=["POST"])
@@ -303,7 +312,7 @@ def firebase_login():
 
     email = data.get("email")
     name = data.get("name")
-    phone = data.get("phone_number")
+    phone = data.get("phone")  # keep naming consistent
 
     if not email:
         return jsonify({"error": "Email is required"}), 400
@@ -315,26 +324,60 @@ def firebase_login():
     user = cursor.fetchone()
 
     if not user:
-        # First time login → insert new user
+        # Insert placeholder, mark for profile completion
         cursor.execute("""
-            INSERT INTO users (email, name, phone_number)
+            INSERT INTO users (email, name, phone)
             VALUES (%s, %s, %s)
         """, (email, name, phone))
         conn.commit()
+
         cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
         user = cursor.fetchone()
 
-    # Create session
+        session["user_id"] = user["id"]
+        session["email"] = user["email"]
+        session["need_profile"] = True
+        cursor.close()
+        conn.close()
+
+        return jsonify({"status": "ok", "need_profile": True})
+
+    # User exists → no profile needed
     session["user_id"] = user["id"]
     session["email"] = user["email"]
-    session["name"] = user["name"]
-    session.permanent = True
-
+    session["need_profile"] = False
     cursor.close()
     conn.close()
 
-    return jsonify({"message": "Login successful"})
+    return jsonify({"status": "ok", "need_profile": False})
+
 # Admin Route Protection & Notifications ---
+
+@app.route("/complete-profile", methods=["GET", "POST"])
+def complete_profile():
+    if "user_id" not in session:
+        return redirect("/login")
+
+    if request.method == "POST":
+        name = request.form.get("name")
+        phone = request.form.get("phone")
+
+        if not name or not phone:
+            return render_template("complete_profile.html", error="Please fill all fields")
+
+        conn, cursor = get_db_connection()
+        cursor.execute(
+            "UPDATE users SET name=%s, phone=%s WHERE id=%s",
+            (name, phone, session["user_id"])
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return redirect("/home")
+
+    return render_template("complete_profile.html")
+
 
 @app.route('/admin/dashboard')
 def admin_dashboard():
@@ -1364,6 +1407,6 @@ def orders():
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0", port=5055)
+    app.run(host="0.0.0.0",debug=True, port=5055)
 
 
