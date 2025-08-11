@@ -44,101 +44,95 @@
 <body>
 <div class="login-box">
   <h2>Login to CampusBites</h2>
+
+  <!-- Google Login -->
   <button class="google-btn" id="googleLogin">Login with Google</button>
   <hr>
-  <input type="email" id="email" placeholder="Email" required>
-  <input type="password" id="password" placeholder="Password" required>
-  <button class="email-btn" id="emailLogin">Login / Register with Email</button>
+
+  <!-- Email + Password -->
+  <input type="email" id="email" placeholder="Email"><br><br>
+  <input type="password" id="password" placeholder="Password"><br><br>
+
+  <!-- Separate Buttons -->
+  <button class="email-btn" id="emailLogin">Login with Email</button>
+  <button class="email-btn" style="background:#f39c12;" id="emailRegister">Register with Email</button>
 </div>
+
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword }
-    from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, 
+         signInWithEmailAndPassword, createUserWithEmailAndPassword } 
+  from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-  const config = await fetch("/firebase-config").then(res => res.json());
-  const app = initializeApp(config);
-  const auth = getAuth(app);
-  const googleProvider = new GoogleAuthProvider();
+// Fetch Firebase config from backend
+const config = await fetch("/firebase-config").then(res => res.json());
+const app = initializeApp(config);
+const auth = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
 
-  document.getElementById("googleLogin").addEventListener("click", async (event) => {
-    event.preventDefault();
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      await sendLoginToBackend(result.user.email, result.user.displayName, null);
-    } catch (error) {
-      alert("Google login failed: " + error.message);
-    }
-  });
+// --- Google Login ---
+document.getElementById("googleLogin").addEventListener("click", async (event) => {
+  event.preventDefault();
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    const user = result.user;
+    await sendLoginToBackend(user.email, user.displayName, null);
+  } catch (error) {
+    alert("Google login failed: " + error.message);
+  }
+});
 
-  document.getElementById("emailLogin").addEventListener("click", async (event) => {
-    event.preventDefault();
+// --- Email Login ---
+document.getElementById("emailLogin").addEventListener("click", async (event) => {
+  event.preventDefault();
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value.trim();
 
-    const email = document.getElementById("email").value.trim();
-    const password = document.getElementById("password").value.trim();
+  if (!email || !password) return alert("Please fill in email & password");
 
-    if (!email || !password) {
-        alert("Please fill in both email & password");
-        return;
-    }
-    if (password.length < 6) {
-    return alert("Password must be at least 6 characters");
-}
-if (!email.includes("@")) {
-    return alert("Invalid email format");
-}
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    const user = userCredential.user;
+    await sendLoginToBackend(user.email, null, null);
+  } catch (error) {
+    alert("Login failed: " + error.message);
+  }
+});
 
+// --- Email Registration ---
+document.getElementById("emailRegister").addEventListener("click", async (event) => {
+  event.preventDefault();
+  const email = document.getElementById("email").value.trim();
+  const password = document.getElementById("password").value.trim();
 
-    try {
-        // Try login first
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        await sendLoginToBackend(user.email, null, null);
-    } catch (error) {
-        if (error.code === "auth/user-not-found") {
-            // First-time user → register account
-            try {
-                const newUser = await createUserWithEmailAndPassword(auth, email, password);
-                const u = newUser.user;
-                const name = prompt("Enter your name:");
-                const phone = prompt("Enter your phone number:");
-                await sendLoginToBackend(u.email, name, phone);
-            } catch (error) {
-    if (error.code === 'auth/user-not-found') {
-        alert("No account found with this email.");
-    } else if (error.code === 'auth/wrong-password') {
-        alert("Incorrect password.");
-    } else if (error.code === 'auth/email-already-in-use') {
-        alert("Email is already registered.");
-    } else {
-        alert(error.message);
-    }
-}
+  if (!email || !password) return alert("Please fill in email & password");
 
-        } else {
-            alert("Email login failed: " + error.message);
-        }
-    }
+  try {
+    const newUser = await createUserWithEmailAndPassword(auth, email, password);
+    const u = newUser.user;
+    const name = prompt("Enter your name:");
+    const phone = prompt("Enter your phone number:");
+    await sendLoginToBackend(u.email, name, phone);
+  } catch (error) {
+    alert("Registration failed: " + error.message);
+  }
 });
 
 async function sendLoginToBackend(email, name, phone) {
-    const res = await fetch("/firebase-login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, name, phone:phone })
-    });
-
-    const data = await res.json();
-    if (res.ok) {
-        if (data.need_profile) {
-            window.location.href = "/complete-profile";
-        } else {
-            window.location.href = "/home";
-        }
-    } else {
-        alert("Backend error: " + data.error);
-    }
+  const res = await fetch("/firebase-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, name, phone })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    window.location.href = "/home";
+  } else {
+    alert("Backend error: " + data.error);
+  }
 }
+
 
 </script>
 </body>
