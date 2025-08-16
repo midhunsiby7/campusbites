@@ -148,7 +148,7 @@ async function initiatePayment(orderUrl, orderData) {
             throw new Error(data.error || 'Could not create Razorpay order.');
         }
 
-        // 2. Configure Razorpay options (still no DB save!)
+        // 2. Configure Razorpay options
         const options = {
             key: data.key_id,
             amount: data.amount,
@@ -163,7 +163,12 @@ async function initiatePayment(orderUrl, orderData) {
                 color: "#F97316"
             },
             handler: function (response) {
-                // Razorpay confirms payment success (async webhook will save to DB)
+                // ✅ Close your custom popup before showing success
+                const popup = document.getElementById("review-popup");
+                if (popup) {
+                    popup.style.display = "none";
+                }
+
                 Swal.fire({
                     icon: 'success',
                     title: 'Payment Successful!',

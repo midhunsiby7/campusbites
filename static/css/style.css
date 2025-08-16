@@ -17,6 +17,9 @@
   padding: 0;
   box-sizing: border-box;
 }
+
+
+
 body, html {
   font-family: 'Segoe UI', sans-serif;
   background: var(--bg-light);
@@ -144,7 +147,7 @@ h1, h2, h3, h4 {
 
 /* LOGO */
 .logo {
-  width: 120px;
+  width: 180px;
   margin: 0 auto 1rem;
 }
 

@@ -61,44 +61,6 @@
   setInterval(fetchLiveStock, 10000);
   window.onload = fetchLiveStock;
 
-  // --- START OF MODIFICATION: User Notifications ---
-  function checkUserNotifications() {
-    fetch('/api/check-user-notifications')
-        .then(res => {
-            if (!res.ok) {
-                console.error('Failed to fetch user notifications API:', res.status, res.statusText);
-                return { has_notification: false };
-            }
-            return res.json();
-        })
-        .then(data => {
-            if (data.has_notification) {
-                Swal.fire({
-                    toast: true,
-                    position: 'top-end',
-                    icon: data.type === 'confirmed_order' ? 'success' : 'info',
-                    title: data.message,
-                    showConfirmButton: false,
-                    timer: 8000, // Increased timer duration
-                    timerProgressBar: true,
-                    didOpen: (toast) => {
-                        toast.addEventListener('mouseenter', Swal.stopTimer);
-                        toast.addEventListener('mouseleave', Swal.resumeTimer);
-                        const audio = new Audio('/static/notification_user.mp3'); 
-                        audio.play().catch(e => console.error("Error playing user notification audio:", e));
-                    }
-                });
-            }
-        })
-        .catch(error => {
-            console.error('Network error during checkUserNotifications:', error);
-        });
-  }
-
-  setInterval(checkUserNotifications, 5000); 
-  document.addEventListener('DOMContentLoaded', checkUserNotifications);
-  // --- END OF MODIFICATION ---
-
 </script>
     <!-- MOBILE BOTTOM NAVIGATION -->
     <nav class="bottom-nav">

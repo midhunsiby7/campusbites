@@ -34,8 +34,13 @@
       color: white;
       border: none;
     }
-    .email-btn {
+    .login-btn {
       background: #34A853;
+      color: white;
+      border: none;
+    }
+    .register-btn {
+      background: #dc2222;
       color: white;
       border: none;
     }
@@ -50,12 +55,12 @@
   <hr>
 
   <!-- Email + Password -->
-  <input type="email" id="email" placeholder="Email"><br><br>
-  <input type="password" id="password" placeholder="Password"><br><br>
+<input type="email" id="email" placeholder="Email"><br><br>
+<input type="password" id="password" placeholder="Password"><br><br>
 
-  <!-- Separate Buttons -->
-  <button class="email-btn" id="emailLogin">Login with Email</button>
-  <button class="email-btn" style="background:#f39c12;" id="emailRegister">Register with Email</button>
+<button class="login-btn" id="emailLogin">Login</button>
+<button class="register-btn" id="emailRegister">Register</button>
+  
 </div>
 
 
@@ -71,13 +76,15 @@ const app = initializeApp(config);
 const auth = getAuth(app);
 const googleProvider = new GoogleAuthProvider();
 
+
 // --- Google Login ---
 document.getElementById("googleLogin").addEventListener("click", async (event) => {
   event.preventDefault();
   try {
     const result = await signInWithPopup(auth, googleProvider);
-    const user = result.user;
-    await sendLoginToBackend(user.email, user.displayName, null);
+    // Get ID token from Firebase
+    const idToken = await auth.currentUser.getIdToken(true);
+    await sendIdTokenToBackend(idToken);
   } catch (error) {
     alert("Google login failed: " + error.message);
   }
@@ -89,12 +96,13 @@ document.getElementById("emailLogin").addEventListener("click", async (event) =>
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value.trim();
 
-  if (!email || !password) return alert("Please fill in email & password");
+  if (!email || !password) return alert("Please enter email and password");
 
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const user = userCredential.user;
-    await sendLoginToBackend(user.email, null, null);
+    // Get ID token from Firebase
+    const idToken = await auth.currentUser.getIdToken(true);
+    await sendIdTokenToBackend(idToken);
   } catch (error) {
     alert("Login failed: " + error.message);
   }
@@ -109,31 +117,39 @@ document.getElementById("emailRegister").addEventListener("click", async (event)
   if (!email || !password) return alert("Please fill in email & password");
 
   try {
-    const newUser = await createUserWithEmailAndPassword(auth, email, password);
-    const u = newUser.user;
+    await createUserWithEmailAndPassword(auth, email, password);
     const name = prompt("Enter your name:");
     const phone = prompt("Enter your phone number:");
-    await sendLoginToBackend(u.email, name, phone);
+
+    // Get ID token from Firebase
+    const idToken = await auth.currentUser.getIdToken(true);
+    await sendIdTokenToBackend(idToken, name, phone);
   } catch (error) {
     alert("Registration failed: " + error.message);
   }
 });
 
-async function sendLoginToBackend(email, name, phone) {
-  const res = await fetch("/firebase-login", {
+// --- Send ID Token to Backend ---
+async function sendIdTokenToBackend(idToken, name = null, phone = null) {
+  const res = await fetch("/api/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, name, phone })
+    body: JSON.stringify({ idToken, name, phone }),
+    credentials: "same-origin" // important for session cookies
   });
+
   const data = await res.json();
   if (res.ok) {
-    window.location.href = "/home";
+    if (data.need_profile) {
+      window.location.href = "/complete-profile";
+    } else {
+      window.location.href = "/home";
+    }
   } else {
-    alert("Backend error: " + data.error);
+    alert("Backend error: " + (data.error || "Unknown error"));
   }
 }
-
-
 </script>
+
 </body>
 </html>

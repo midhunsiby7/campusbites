@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
 import json
 import mysql.connector
@@ -31,14 +30,19 @@ app = Flask(__name__)
 cred = credentials.Certificate("serviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
 
-
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "super-secret-key")
+app.config.update(
+    SESSION_COOKIE_SAMESITE="Lax",      # fine for same-origin pages
+    SESSION_COOKIE_SECURE=False,        # set True in production if you’re fully on HTTPS
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
 
 def daily_task():
     ist = pytz.timezone("Asia/Kolkata")
 
     def run_if_midnight_ist():
         now_ist = datetime.now(ist)
-        if now_ist.hour == 0 and now_ist.minute == 0:
+        if now_ist.hour == 17 and now_ist.minute == 55:
             _daily_cleanup_and_reset_at_startup()
 
     while True:
@@ -64,16 +68,44 @@ razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 def get_db_connection():
     if 'db_conn' not in g:
         g.db_conn = mysql.connector.connect(
-            host="sql12.freesqldatabase.com",
-            user="sql12793683",
-            password="CZw7MlRKZq",
-            database="sql12793683",
+            host="127.0.0.1",
+            user="root",
+            password="8423",
+            database="campusbites",
             port=3306,
             ssl_disabled=True,
             autocommit=False 
         )
         g.cursor = g.db_conn.cursor(dictionary=True, buffered=True)
     return g.db_conn, g.cursor
+
+def get_or_create_user(email, name=None, provider=None):
+    """Returns (user_id, need_profile, db_name, db_phone, db_role). Creates user if not found."""
+    conn, cursor = get_db_connection()
+    try:
+        cursor.execute("SELECT id, name, phone, role FROM users WHERE email=%s LIMIT 1", (email,))
+        row = cursor.fetchone()
+        if not row:
+            # create minimal user; you can store provider if you kept that column
+            cursor.execute("""
+                INSERT INTO users (email, name, phone, role)
+                VALUES (%s, %s, %s, %s)
+            """, (email, name, None, 'student'))
+            conn.commit()
+            user_id = cursor.lastrowid
+            need_profile = True
+            return user_id, need_profile, (name or ""), None, 'student'
+        else:
+            user_id = row['id']
+            db_name = row['name']
+            db_phone = row['phone']
+            db_role = row.get('role', 'student') if isinstance(row, dict) else row['role']
+            need_profile = (not db_name) or (not db_phone)
+            return user_id, need_profile, db_name, db_phone, db_role
+    finally:
+        cursor.close()
+        conn.close()
+
 
 @app.before_request
 def before_request():
@@ -178,10 +210,10 @@ def _daily_cleanup_and_reset_at_startup():
     startup_cursor = None
     try:
         startup_db_conn = mysql.connector.connect(
-            host="sql12.freesqldatabase.com",
-            user="sql12793683",
-            password="CZw7MlRKZq",
-            database="sql12793683",
+            host="127.0.0.1",
+            user="root",
+            password="8423",
+            database="campusbites",
             port=3306,
             ssl_disabled=True,
             autocommit=False
@@ -285,8 +317,17 @@ def admin_login():
 
 @app.route("/login")
 def login_page():
-    return render_template("login.html")
+        return render_template("login.html")
 
+@app.route('/check-login', methods=['GET'])
+def check_login():
+    is_admin = bool(session.get('admin_id'))
+    is_user = bool(session.get('user_id'))
+    role = 'admin' if is_admin else ('user' if is_user else None)
+    return jsonify({
+        "logged_in": bool(role),
+        "role": role
+    })
 
 import hashlib  # if you're using hashlib for hashing
 
@@ -307,12 +348,9 @@ def firebase_config():
 @app.route("/firebase-login", methods=["POST"])
 def firebase_login():
     data = request.get_json()
-    if not data:
-        return jsonify({"error": "Invalid request"}), 400
-
     email = data.get("email")
     name = data.get("name")
-    phone = data.get("phone")  # keep naming consistent
+    phone = data.get("phone")
 
     if not email:
         return jsonify({"error": "Email is required"}), 400
@@ -324,32 +362,34 @@ def firebase_login():
     user = cursor.fetchone()
 
     if not user:
-        # Insert placeholder, mark for profile completion
+        # Create minimal record (default role: student)
         cursor.execute("""
-            INSERT INTO users (email, name, phone)
-            VALUES (%s, %s, %s)
-        """, (email, name, phone))
+            INSERT INTO users (email, name, phone, role)
+            VALUES (%s, %s, %s, %s)
+        """, (email, name, phone, 'student'))
         conn.commit()
-
         cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
         user = cursor.fetchone()
 
-        session["user_id"] = user["id"]
-        session["email"] = user["email"]
-        session["need_profile"] = True
-        cursor.close()
-        conn.close()
-
-        return jsonify({"status": "ok", "need_profile": True})
-
-    # User exists → no profile needed
+    # Create session with correct keys
     session["user_id"] = user["id"]
-    session["email"] = user["email"]
-    session["need_profile"] = False
+    session["user_email"] = user["email"]  # <- match your existing checks
+    session["user_name"] = user["name"] or email.split('@')[0]  # default to prefix if name missing
+    session["role"] = user.get("role", "student") if isinstance(user, dict) else "student"
+    session.permanent = True  # <- keep logged in for PERMANENT_SESSION_LIFETIME
+
     cursor.close()
     conn.close()
 
-    return jsonify({"status": "ok", "need_profile": False})
+    # Check if profile is incomplete
+    need_profile = not user["name"] or not user["phone"]
+
+    return jsonify({
+        "ok": True,
+        "need_profile": bool(need_profile),
+        "role": session["role"]
+    })
+
 
 # Admin Route Protection & Notifications ---
 
@@ -795,7 +835,7 @@ def admin_view_order(order_id):
 
     cursor.execute("""
         SELECT o.id AS order_id, o.status, o.token_number, o.total, o.created_at,
-               u.name AS user_name, u.admission_number,
+               u.name AS user_name,
                fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image
         FROM orders o
         JOIN users u ON o.user_id = u.id
@@ -872,7 +912,7 @@ def scan_order(order_id):
 
     cursor.execute("""
         SELECT o.id AS order_id, o.status, o.token_number, o.total, o.created_at,
-               u.name AS user_name, u.admission_number,
+               u.name AS user_name,
                fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image
         FROM orders o
         JOIN users u ON o.user_id = u.id
@@ -896,7 +936,7 @@ def get_uncollected_tokens():
     conn, cursor = get_db_connection()
 
     query = """
-        SELECT ut.token_number, u.name as user_name, u.admission_number, o.status as order_status, ut.order_date
+        SELECT ut.token_number, u.name as user_name, o.status as order_status, ut.order_date
         FROM uncollected_tokens ut
         JOIN orders o ON ut.order_id = o.id
         JOIN users u ON o.user_id = u.id
@@ -922,52 +962,14 @@ def live_stock():
     stock_data = cursor.fetchall()
     return jsonify({str(row['food_id']): row['stock'] for row in stock_data})
 
-@app.route('/api/notifications')
-def get_notifications():
-    """Unified API to fetch unread notifications for users and admins."""
-    user_id, is_admin = session.get('user_id'), session.get('admin_logged_in')
-    if not user_id and not is_admin: return jsonify([])
 
-    conn, cursor = get_db_connection()
-    query, params = "", []
-
-    if is_admin:
-        query = "SELECT * FROM notifications WHERE is_admin_notification = TRUE AND is_read = FALSE ORDER BY created_at DESC"
-    else:
-        query = "SELECT * FROM notifications WHERE user_id = %s AND is_admin_notification = FALSE AND is_read = FALSE ORDER BY created_at DESC"
-        params.append(user_id)
-    
-    cursor.execute(query, tuple(params))
-    notifications = cursor.fetchall()
-    
-    for n in notifications:
-        if isinstance(n.get('created_at'), (datetime, date)):
-            n['created_at'] = n['created_at'].isoformat()
-    return jsonify(notifications)
-
-@app.route('/api/notifications/mark-read', methods=['POST'])
-def mark_notifications_read():
-    """Marks specific notifications as read."""
-    if not (session.get('user_id') or session.get('admin_logged_in')):
-        return jsonify({'error': 'Unauthorized'}), 401
-    
-    data = request.get_json()
-    notification_ids = data.get('ids')
-    if not isinstance(notification_ids, list) or not notification_ids:
-        return jsonify({'error': 'Invalid payload'}), 400
-
-    conn, cursor = get_db_connection()
-    placeholders = ','.join(['%s'] * len(notification_ids))
-    query = f"UPDATE notifications SET is_read = TRUE WHERE id IN ({placeholders})"
-    
-    cursor.execute(query, tuple(notification_ids))
-    return jsonify({'success': True}), 200
 
 @app.route('/home')
 def home():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
-        return redirect('/login')
+        return redirect(url_for('login'))
+
 
     now = datetime.now()
     today = datetime.now().date()
@@ -988,6 +990,9 @@ def home():
 @app.route('/food/<int:food_id>')
 def food_detail(food_id):
     conn, cursor = get_db_connection()
+    if not session.get('user_id'):
+        return redirect(url_for('login'))
+
     today = date.today()
 
     cursor.execute("""
@@ -1007,7 +1012,8 @@ def food_detail(food_id):
 def cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
-        return redirect('/login')
+        return redirect(url_for('login'))
+
 
     time_threshold = datetime.now() - timedelta(hours=24)
     cursor.execute("DELETE FROM cart_items WHERE user_id = %s AND added_at < %s",
@@ -1195,8 +1201,13 @@ def payment_webhook():
 
             conn.commit()
 
-            create_notification(user_id=None, message=f"New Paid Order! Token #{token_number}", notif_type='new_paid_order', related_id=order_id, is_admin=True)
-            create_notification(user_id=user_id, message=f"Payment successful! Your order #{token_number} is confirmed.", notif_type='payment_successful', related_id=order_id)
+            # Remove admin notification
+            create_notification(
+               user_id=user_id,
+               message=f"Payment successful! Your order #{token_number} is confirmed.",
+               notif_type='payment_successful',
+               related_id=order_id
+            )
 
             print(f"✅ Order #{order_id} saved successfully after payment")
 

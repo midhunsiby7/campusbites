@@ -40,7 +40,7 @@
       </div>
       <div class="filter-row">
         <input type="text" name="search" id="searchInput" placeholder="Search by name or token...">
-        <button type="submit" id="applyFilterBtn">Apply</button>
+        <!-- Apply button removed -->
       </div>
     </form>
 
@@ -49,17 +49,16 @@
       <div class="order-card" data-id="{{ order.id }}" data-status="{{ order.status }}">
         <div class="order-header">
           <div>
-            <strong>#{{ order.token_number }}</strong>
             <small>Order ID: {{ order.id }}</small>
           </div>
           {% if order.status == 'confirmed' and order.payment_status == 'paid' %}
-    <span class="badge status-badge">Confirmed and Paid</span>
-{% else %}
-    <span class="badge status-badge">{{ order.status|capitalize }}</span>
-{% endif %}
-
+            <span class="badge status-badge">Confirmed and Paid</span>
+          {% else %}
+            <span class="badge status-badge">{{ order.status|capitalize }}</span>
+          {% endif %}
         </div>
         <div class="order-body">
+          <p><strong>Token No:</strong> {{ order.token_number }}</p>
           <p><strong>User:</strong> {{ order.user_name }}</p>
           <p><strong>Total:</strong> ₹{{ order.total }}</p>
           <p><strong>Time:</strong> {{ order.created_at.strftime('%d %b, %I:%M %p') if order.created_at else 'N/A' }}</p>
@@ -81,158 +80,110 @@
       {% endfor %}
     </div>
   </main>
-</body>
-</html>
 
-
-
-
-  <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
   <script>
-  const socket = io();
+const searchInput = document.getElementById("searchInput");
+const sortSelect = document.getElementById("sortSelect");
+const statusFilter = document.getElementById("statusFilter");
 
-  socket.on('new_notification', function(data) {
-    // Show it like a YouTube/WhatsApp style notification
-    showLiveNotification(data.message, data.type);
+if (searchInput) searchInput.addEventListener("input", filterTable);
+if (sortSelect) sortSelect.addEventListener("change", applyFilters);
+if (statusFilter) statusFilter.addEventListener("change", applyFilters);
+
+function filterTable() {
+  const query = searchInput.value.trim().toLowerCase();
+  const status = statusFilter.value;
+  const sortOrder = sortSelect.value;
+  const cards = Array.from(document.querySelectorAll(".order-card"));
+  let visibleCount = 0;
+
+  cards.forEach(card => {
+    const tokenNum = card.querySelector(".order-header strong")?.innerText.replace("#", "").trim().toLowerCase() || "";
+    const userName = card.querySelector(".order-body p:nth-child(1)")?.innerText.split(":")[1]?.trim().toLowerCase() || "";
+
+    const matchesQuery = !query || tokenNum.includes(query) || userName.includes(query);
+    const matchesStatus = status === "all" || card.dataset.status === status;
+
+    if (matchesQuery && matchesStatus) {
+      card.style.display = "flex";
+      visibleCount++;
+    } else {
+      card.style.display = "none";
+    }
   });
 
-  function showLiveNotification(msg, type) {
-    const notifBox = document.createElement('div');
-    notifBox.className = 'live-notification ' + type;
-    notifBox.innerHTML = msg;
+  // Sort visible cards
+  const wrapper = document.querySelector(".orders-wrapper");
+  const visibleCards = cards.filter(c => c.style.display !== "none");
+  visibleCards.sort((a, b) => {
+    const idA = parseInt(a.dataset.id);
+    const idB = parseInt(b.dataset.id);
+    return sortOrder === "newest" ? idB - idA : idA - idB;
+  });
+  wrapper.innerHTML = "";
+  visibleCards.forEach(c => wrapper.appendChild(c));
 
-    document.body.appendChild(notifBox);
-
-    setTimeout(() => notifBox.remove(), 4000);
+  // Show "no results" message if nothing found
+  if (visibleCount === 0) {
+    wrapper.innerHTML = `<p style="text-align:center; color:#777; margin-top:20px;">No matching orders found</p>`;
   }
-
-  const searchInput = document.getElementById("searchInput");
-  const sortSelect = document.getElementById("sortSelect");
-  const statusFilter = document.getElementById("statusFilter");
-
-  if (searchInput) searchInput.addEventListener("input", filterTable);
-  if (sortSelect) sortSelect.addEventListener("change", applyFilters);
-  if (statusFilter) statusFilter.addEventListener("change", applyFilters);
-
-  function filterTable() {
-    const query = searchInput.value.toLowerCase();
-    const status = statusFilter.value;
-
-    const cards = document.querySelectorAll(".order-card");
-    const sorted = Array.from(cards);
-
-    // Apply status & search filters
-    sorted.forEach(card => {
-      const text = card.innerText.toLowerCase();
-      const matchesQuery = text.includes(query);
-      const matchesStatus = status === "all" || card.dataset.status === status;
-      card.style.display = matchesQuery && matchesStatus ? "flex" : "none";
+  if (searchInput) {
+  ["input", "keyup", "change"].forEach(evt => {
+    searchInput.addEventListener(evt, () => {
+      filterTable();
     });
-  }
+  });
+}
 
-  function applyFilters() {
-    filterTable();
-  }
+}
 
-  async function openUncollectedTokensPopup() {
-    const popup = document.getElementById("uncollected-tokens-popup");
+function applyFilters() {
+  filterTable();
+}
 
-    try {
-      const res = await fetch("/admin/uncollected-tokens");
-      const data = await res.json();
+let latestOrderId = parseInt(document.querySelector('.order-card')?.dataset.id || '0');
 
-      if (!data.length) {
-        Swal.fire("No uncollected tokens found.");
-        return;
+async function liveUpdateDashboard() {
+  try {
+    const response = await fetch(window.location.href);
+    const html = await response.text();
+    const newDoc = new DOMParser().parseFromString(html, 'text/html');
+    const newCards = newDoc.querySelector('.orders-wrapper');
+
+    if (newCards && newCards.children.length > 0) {
+      const newFirstOrder = newCards.querySelector('.order-card');
+      const newFirstOrderId = parseInt(newFirstOrder?.dataset.id || '0');
+      if (newFirstOrderId > latestOrderId) {
+        latestOrderId = newFirstOrderId;
       }
-
-      popup.innerHTML = `
-  <div class="popup-content">
-    <div class="popup-header">
-      Uncollected Tokens
-      <button onclick="closeUncollectedTokensPopup()">Close</button>
-    </div>
-    <div class="token-list">
-      ${data.map(item => `
-        <div class="token-entry">
-          <p><strong>Token #${item.token_number}</strong></p>
-          <p>User: ${item.user_name} (${item.admission_number})</p>
-          <p>Status: ${item.order_status}</p>
-          <p>Date: ${item.order_date}</p>
-          <hr />
-        </div>
-      `).join('')}
-    </div>
-  </div>
-`;
-
-      popup.style.display = "flex";
-    } catch (err) {
-      console.error("Failed to load tokens", err);
-      Swal.fire("Failed to fetch token data.");
+      document.querySelector('.orders-wrapper').innerHTML = newCards.innerHTML;
     }
-  }
 
-  function closeUncollectedTokensPopup() {
-    document.getElementById("uncollected-tokens-popup").style.display = "none";
-  }
+    // Re-apply current filters instantly after refresh
+    filterTable();
 
-  let latestOrderId = parseInt(document.querySelector('.order-card')?.dataset.id || '0');
-
-
-  async function liveUpdateDashboard() {
-    try {
-      const response = await fetch(window.location.href);
-      const html = await response.text();
-      const newDoc = new DOMParser().parseFromString(html, 'text/html');
-      const newCards = newDoc.querySelector('.orders-wrapper');
-
-      if (newCards && newCards.children.length > 0) {
-  const newFirstOrder = newCards.querySelector('.order-card');
-  const newFirstOrderId = parseInt(newFirstOrder?.dataset.id || '0');
-
-  if (newFirstOrderId > latestOrderId) {
-    Swal.fire({
-      toast: true,
-      position: 'top-end',
-      icon: 'info',
-      title: 'A new order has arrived!',
-      showConfirmButton: false,
-      timer: 4000,
-      didOpen: () => {
-        const audio = new Audio("{{ url_for('static', filename='notification.mp3') }}");
-        audio.play().catch(e => console.error("Audio failed:", e));
-      }
-    });
-    latestOrderId = newFirstOrderId;
+  } catch (err) {
+    console.error("Live update failed", err);
   }
 }
 
-      document.querySelector('.orders-wrapper').innerHTML = newCards.innerHTML;
-      filterTable();
-    } catch (err) {
-      console.error("Live update failed", err);
-    }
+document.addEventListener('DOMContentLoaded', () => {
+  filterTable();
+  setInterval(liveUpdateDashboard, 7000);
+});
+
+// Preserve scroll position
+window.addEventListener("beforeunload", function () {
+  sessionStorage.setItem("scrollPos", window.scrollY);
+});
+window.addEventListener("load", function () {
+  const scrollPos = sessionStorage.getItem("scrollPos");
+  if (scrollPos !== null) {
+    window.scrollTo(0, parseInt(scrollPos));
+    sessionStorage.removeItem("scrollPos");
   }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    filterTable();
-    setInterval(liveUpdateDashboard, 7000);
-  });
-
-  // Store scroll position before unload
-  window.addEventListener("beforeunload", function () {
-    sessionStorage.setItem("scrollPos", window.scrollY);
-  });
-
-  // Scroll to the stored position on load
-  window.addEventListener("load", function () {
-    const scrollPos = sessionStorage.getItem("scrollPos");
-    if (scrollPos !== null) {
-      window.scrollTo(0, parseInt(scrollPos));
-      sessionStorage.removeItem("scrollPos");
-    }
-  });
+});
 </script>
+
 </body>
 </html>

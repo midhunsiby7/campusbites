@@ -189,56 +189,6 @@
         setInterval(updateCountdown, 1000);
     });
 
-  // --- START OF MODIFICATION: User Notifications ---
-  async function checkUserNotifications() {
-        try {
-            const response = await fetch("{{ url_for('get_notifications') }}");
-            if (!response.ok) return;
-
-            const notifications = await response.json();
-            if (notifications.length === 0) return;
-
-            const idsToMarkRead = [];
-            let shouldReload = false;
-
-            notifications.forEach(notif => {
-                const icon = (notif.type === 'order_confirmed') ? 'success' : 'info';
-                Swal.fire({
-                    toast: true, position: 'top-end', icon: icon,
-                    title: notif.message, showConfirmButton: false, timer: 8000
-                });
-                idsToMarkRead.push(notif.id);
-                // If an order is confirmed, reload the page to update its status
-                if (notif.type === 'order_confirmed') {
-                    shouldReload = true;
-                }
-            });
-
-            // Mark these notifications as read on the backend
-            if (idsToMarkRead.length > 0) {
-                await fetch("{{ url_for('mark_notifications_read') }}", {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ids: idsToMarkRead })
-                });
-            }
-            if(shouldReload){
-                setTimeout(() => window.location.reload(), 2500);
-            }
-
-        } catch (error) {
-            console.error("Error fetching user notifications:", error);
-        }
-    }
-    
-    // This part at the bottom of the script should also be updated or added
-    document.addEventListener('DOMContentLoaded', () => {
-        // ... your existing countdown logic here ...
-        checkUserNotifications(); // Check once on load
-        setInterval(checkUserNotifications, 5000); // Check every 5 seconds
-    });
-
-  // --- END OF MODIFICATION ---
   </script>
       <!-- MOBILE BOTTOM NAVIGATION -->
     <nav class="bottom-nav">
