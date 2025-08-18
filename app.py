@@ -11,31 +11,52 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
 import re
 import time as time_module
-import razorpay # Import the Razorpay library
+import razorpay
 import hmac
 import hashlib
 import schedule
 import threading
-# Background daily scheduler thread
 import pytz
 import firebase_admin
 from firebase_admin import credentials, auth
+from dotenv import load_dotenv  # Add this import
 
-
+# Load environment variables
+load_dotenv()  # Add this line
 
 # At the top
 app = Flask(__name__)
 
+# Update all your configuration to use environment variables:
+app.secret_key = os.getenv("FLASK_SECRET_KEY")
+app.config.update(
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=False,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+)
+
+# Database configuration
+DB_CONFIG = {
+    'host': os.getenv("DB_HOST"),
+    'user': os.getenv("DB_USER"),
+    'password': os.getenv("DB_PASSWORD"),
+    'database': os.getenv("DB_NAME"),
+    'port': int(os.getenv("DB_PORT")),
+    'ssl_disabled': True,
+    'autocommit': False
+}
+
+# Razorpay configuration
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
+
+# Initialize Razorpay client
+razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 cred = credentials.Certificate("serviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
 
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "super-secret-key")
-app.config.update(
-    SESSION_COOKIE_SAMESITE="Lax",      # fine for same-origin pages
-    SESSION_COOKIE_SECURE=False,        # set True in production if you’re fully on HTTPS
-    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
-)
 
 def daily_task():
     ist = pytz.timezone("Asia/Kolkata")
@@ -67,15 +88,7 @@ razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 def get_db_connection():
     if 'db_conn' not in g:
-        g.db_conn = mysql.connector.connect(
-            host="127.0.0.1",
-            user="root",
-            password="8423",
-            database="campusbites",
-            port=3306,
-            ssl_disabled=True,
-            autocommit=False 
-        )
+        g.db_conn = mysql.connector.connect(**DB_CONFIG)
         g.cursor = g.db_conn.cursor(dictionary=True, buffered=True)
     return g.db_conn, g.cursor
 
@@ -209,15 +222,7 @@ def _daily_cleanup_and_reset_at_startup():
     startup_db_conn = None
     startup_cursor = None
     try:
-        startup_db_conn = mysql.connector.connect(
-            host="127.0.0.1",
-            user="root",
-            password="8423",
-            database="campusbites",
-            port=3306,
-            ssl_disabled=True,
-            autocommit=False
-        )
+        startup_db_conn = mysql.connector.connect(**DB_CONFIG)
         startup_cursor = startup_db_conn.cursor(dictionary=True, buffered=True)
 
         yesterday = date.today() - timedelta(days=1)
@@ -334,14 +339,14 @@ import hashlib  # if you're using hashlib for hashing
 # Load Firebase public config from file
 @app.route("/firebase-config")
 def firebase_config():
-    return jsonify({ 
-  "apiKey": "AIzaSyA_uhRgSRZ3FAEByIcy6OiDUDjg9olUepg",
-  "authDomain": "campusbites-964d4.firebaseapp.com",
-  "projectId": "campusbites-964d4",
-  "storageBucket": "campusbites-964d4.firebasestorage.app",
-  "messagingSenderId": "387692591098",
-  "appId": "1:387692591098:web:373218ae5e0eba33491643",
-  "measurementId": "G-JXBZ4H874P"
+    return jsonify({
+        "apiKey": os.getenv("FIREBASE_API_KEY"),
+        "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN"),
+        "projectId": os.getenv("FIREBASE_PROJECT_ID"),
+        "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
+        "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID"),
+        "appId": os.getenv("FIREBASE_APP_ID"),
+        "measurementId": os.getenv("FIREBASE_MEASUREMENT_ID")
     })
 
 # Handle login data from frontend
