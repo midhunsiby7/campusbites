@@ -9,8 +9,11 @@
 <body class="home-body has-bottom-nav">
   <div class="settings-container">
     <h2>Settings</h2>
-    <p><strong>Name:</strong> {{ session.name }}</p>
-    <p><strong>Email:</strong> {{ session.email }}</p>
+    <div>
+        <p><strong>Name:</strong> {{ user.name }}</p>
+        <p><strong>Email:</strong> {{ user.email }}</p>
+        <p><strong>Phone:</strong> {{ user.phone }}</p>
+    </div>
     <form action="{{ url_for('logout') }}" method="post">
       <button type="submit" class="logout-btn">Logout</button>
     </form>

@@ -1,0 +1,11 @@
+@app.route("/firebase-config")
+def firebase_config():
+    return jsonify({ 
+  "apiKey": "AIzaSyA_uhRgSRZ3FAEByIcy6OiDUDjg9olUepg",
+  "authDomain": "campusbites-964d4.firebaseapp.com",
+  "projectId": "campusbites-964d4",
+  "storageBucket": "campusbites-964d4.firebasestorage.app",
+  "messagingSenderId": "387692591098",
+  "appId": "1:387692591098:web:373218ae5e0eba33491643",
+  "measurementId": "G-JXBZ4H874P"
+    })

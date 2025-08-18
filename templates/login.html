@@ -109,6 +109,7 @@ document.getElementById("emailLogin").addEventListener("click", async (event) =>
 });
 
 // --- Email Registration ---
+// --- Email Registration ---
 document.getElementById("emailRegister").addEventListener("click", async (event) => {
   event.preventDefault();
   const email = document.getElementById("email").value.trim();
@@ -118,30 +119,33 @@ document.getElementById("emailRegister").addEventListener("click", async (event)
 
   try {
     await createUserWithEmailAndPassword(auth, email, password);
-    const name = prompt("Enter your name:");
-    const phone = prompt("Enter your phone number:");
+    // ❌ Remove these popup prompts:
+    // const name = prompt("Enter your name:");
+    // const phone = prompt("Enter your phone number:");
 
     // Get ID token from Firebase
     const idToken = await auth.currentUser.getIdToken(true);
-    await sendIdTokenToBackend(idToken, name, phone);
+    // ✅ Don't pass name and phone - let backend handle it
+    await sendIdTokenToBackend(idToken);
   } catch (error) {
     alert("Registration failed: " + error.message);
   }
 });
 
 // --- Send ID Token to Backend ---
+// --- Send ID Token to Backend ---
 async function sendIdTokenToBackend(idToken, name = null, phone = null) {
-  const res = await fetch("/api/login", {
+  const res = await fetch("/firebase-login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ idToken, name, phone }),
-    credentials: "same-origin" // important for session cookies
+    credentials: "same-origin"
   });
 
   const data = await res.json();
   if (res.ok) {
     if (data.need_profile) {
-      window.location.href = "/complete-profile";
+      window.location.href = "/complete-profile";  // ✅ This will redirect to your page
     } else {
       window.location.href = "/home";
     }

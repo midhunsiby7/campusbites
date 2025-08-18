@@ -42,7 +42,7 @@ def daily_task():
 
     def run_if_midnight_ist():
         now_ist = datetime.now(ist)
-        if now_ist.hour == 17 and now_ist.minute == 55:
+        if now_ist.hour == 18 and now_ist.minute == 4:
             _daily_cleanup_and_reset_at_startup()
 
     while True:
@@ -237,8 +237,8 @@ def _daily_cleanup_and_reset_at_startup():
 
         # Get all orders from yesterday (no status filter)
         startup_cursor.execute("""
-            SELECT * FROM orders WHERE DATE(created_at) = %s
-        """, (yesterday,))
+            SELECT * FROM orders
+        """)
         old_orders = startup_cursor.fetchall()
 
         for order in old_orders:
@@ -347,13 +347,25 @@ def firebase_config():
 # Handle login data from frontend
 @app.route("/firebase-login", methods=["POST"])
 def firebase_login():
+    print("got it")
     data = request.get_json()
-    email = data.get("email")
+    id_token = data.get("idToken")
     name = data.get("name")
     phone = data.get("phone")
 
-    if not email:
-        return jsonify({"error": "Email is required"}), 400
+    if not id_token:
+        return jsonify({"error": "ID token is required"}), 400
+
+    try:
+        # Verify the Firebase ID token with clock skew tolerance
+        decoded_token = auth.verify_id_token(id_token, clock_skew_seconds=60)
+        email = decoded_token.get('email')
+        
+        if not email:
+            return jsonify({"error": "Email not found in token"}), 400
+
+    except Exception as e:
+        return jsonify({"error": "Invalid token: " + str(e)}), 401
 
     conn, cursor = get_db_connection()
 
@@ -373,16 +385,17 @@ def firebase_login():
 
     # Create session with correct keys
     session["user_id"] = user["id"]
-    session["user_email"] = user["email"]  # <- match your existing checks
-    session["user_name"] = user["name"] or email.split('@')[0]  # default to prefix if name missing
+    session["user_email"] = user["email"]
+    session["user_name"] = user["name"] or email.split('@')[0]
     session["role"] = user.get("role", "student") if isinstance(user, dict) else "student"
-    session.permanent = True  # <- keep logged in for PERMANENT_SESSION_LIFETIME
+    session.permanent = True
 
     cursor.close()
     conn.close()
 
     # Check if profile is incomplete
-    need_profile = not user["name"] or not user["phone"]
+    # Check if profile is incomplete
+    need_profile = (user["name"] is None or user["name"] == "") or (user["phone"] is None or user["phone"] == "")
 
     return jsonify({
         "ok": True,
@@ -395,7 +408,7 @@ def firebase_login():
 
 @app.route("/complete-profile", methods=["GET", "POST"])
 def complete_profile():
-    if "user_id" not in session:
+    if "user_id" not in session:  # This should match what you set in firebase-login
         return redirect("/login")
 
     if request.method == "POST":
@@ -411,13 +424,16 @@ def complete_profile():
             (name, phone, session["user_id"])
         )
         conn.commit()
+        
+        # Update session with new name
+        session["user_name"] = name
+        
         cursor.close()
         conn.close()
 
         return redirect("/home")
 
     return render_template("complete_profile.html")
-
 
 @app.route('/admin/dashboard')
 def admin_dashboard():
@@ -1362,7 +1378,14 @@ def cancel_order(order_id):
 def settings():
     if not session.get('user_id'):
         return redirect('/login')
-    return render_template('settings.html')
+    
+    conn, cursor = get_db_connection()
+    cursor.execute("SELECT name, email, phone FROM users WHERE id = %s", (session['user_id'],))
+    user = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    return render_template('settings.html', user=user)
 
 @app.route('/logout', methods=['POST'])
 def logout():
@@ -1419,5 +1442,3 @@ def orders():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0",debug=True, port=5055)
-
-
