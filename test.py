@@ -1253,6 +1253,17 @@ def orders():
 
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
 
-if __name__ == "__main__":
+#if __name__ == "__main__":
     _daily_cleanup_and_reset_at_startup()
     app.run(host="0.0.0.0", port=5055, debug=True)
+
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAJMF0g40um4wYFqqWdLZy_ykvzBg_hrmE",
+  authDomain: "campusbites-66407.firebaseapp.com",
+  projectId: "campusbites-66407",
+  storageBucket: "campusbites-66407.firebasestorage.app",
+  messagingSenderId: "659214996071",
+  appId: "1:659214996071:web:8f6a66d060f15ee099fac2",
+  measurementId: "G-RH1TVZFYP7"
+};

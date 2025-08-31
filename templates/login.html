@@ -119,10 +119,6 @@ document.getElementById("emailRegister").addEventListener("click", async (event)
 
   try {
     await createUserWithEmailAndPassword(auth, email, password);
-    // ❌ Remove these popup prompts:
-    // const name = prompt("Enter your name:");
-    // const phone = prompt("Enter your phone number:");
-
     // Get ID token from Firebase
     const idToken = await auth.currentUser.getIdToken(true);
     // ✅ Don't pass name and phone - let backend handle it

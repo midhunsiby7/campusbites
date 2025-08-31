@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
+from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g ,abort
 import json
 import mysql.connector
 import qrcode
@@ -20,19 +20,35 @@ import pytz
 import firebase_admin
 from firebase_admin import credentials, auth
 from dotenv import load_dotenv  # Add this import
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from functools import wraps
+import logging
 
 # Load environment variables
 load_dotenv()  # Add this line
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # At the top
 app = Flask(__name__)
+
+# Rate limiting
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+limiter.init_app(app)
 
 # Update all your configuration to use environment variables:
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
 app.config.update(
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=False,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=30),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax", 
+    SESSION_COOKIE_SECURE=os.getenv("FLASK_ENV") == "production",  # Only secure in production
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
+    MAX_CONTENT_LENGTH=5 * 1024 * 1024,  # 5MB max file size
 )
 
 # Database configuration
@@ -54,7 +70,7 @@ RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 # Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
-cred = credentials.Certificate("serviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
+cred = credentials.Certificate("myserviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
 
 
@@ -74,12 +90,6 @@ threading.Thread(target=daily_task, daemon=True).start()
 
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
-app.secret_key = 'super-secret-key'
-
-RAZORPAY_KEY_ID = "rzp_test_6EWdw5ccuRLg2c" 
-RAZORPAY_KEY_SECRET = "lV3wcbsNVEAj4mbZB8jzayBb"
-# This is the secret you created in the Razorpay Webhook settings
-RAZORPAY_WEBHOOK_SECRET = "99Um2MwF@jwVwtW"
 
 # Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
@@ -158,6 +168,16 @@ def create_notification(user_id, message, notif_type, related_id=None, is_admin=
     except mysql.connector.Error as err:
         print(f"---!!! [create_notification] DATABASE ERROR: {err} !!!---")
         conn.rollback()
+
+@app.after_request
+def after_request(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
 
 from PIL import Image
 import re
@@ -290,6 +310,22 @@ def _daily_cleanup_and_reset_at_startup():
             startup_cursor.close()
             startup_db_conn.close()
 
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("user_id"):
+            return redirect("/login")
+        return f(*args, **kwargs)
+    return wrapper
+
+def admin_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin_logged_in"):
+            return redirect("/admin/login")
+        return f(*args, **kwargs)
+    return wrapper
+
 
 
 @app.route('/')
@@ -298,24 +334,30 @@ def intro():
 
 # Admin Login Page
 @app.route('/admin/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")  # ADD this line
 def admin_login():
     if session.get('admin_logged_in'):
         return redirect(url_for('admin_dashboard'))
     error = None
     if request.method == 'POST':
-        conn, cursor = get_db_connection()
-        username = request.form['username']
-        password = request.form['password']
-        cursor.execute("SELECT * FROM admin_users WHERE username = %s", (username,))
-        admin = cursor.fetchone()
-        #  Check hashed password
-        if admin and check_password_hash(admin['password'], password):
-            session['admin_logged_in'] = True
-            session['admin_username'] = admin['username']
-            session.permanent = True
-            return redirect(url_for('admin_dashboard'))
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        
+        if not username or not password:
+            error = "Username and password are required"
         else:
-            error = "Invalid credentials. Please try again."
+            conn, cursor = get_db_connection()
+            cursor.execute("SELECT * FROM admin_users WHERE username = %s", (username,))
+            admin = cursor.fetchone()
+            if admin and check_password_hash(admin['password'], password):
+                session['admin_logged_in'] = True
+                session['admin_username'] = admin['username']
+                session.permanent = True
+                logger.info(f"Admin login successful: {username}")
+                return redirect(url_for('admin_dashboard'))
+            else:
+                error = "Invalid credentials. Please try again."
+                logger.warning(f"Failed admin login attempt: {username} from {request.remote_addr}")
     return render_template('admin_login.html', error=error)
 
 # User Login Page
@@ -351,35 +393,43 @@ def firebase_config():
 
 # Handle login data from frontend
 @app.route("/firebase-login", methods=["POST"])
+@limiter.limit("10 per minute")  # ADD this line
 def firebase_login():
-    print("got it")
     data = request.get_json()
     id_token = data.get("idToken")
-    name = data.get("name")
-    phone = data.get("phone")
+    name = data.get("name", "")
+    phone = data.get("phone", "")
 
     if not id_token:
         return jsonify({"error": "ID token is required"}), 400
+    
+    # ADD input validation
+    if name and len(name) > 100:
+        return jsonify({"error": "Name too long"}), 400
+    if phone and not re.match(r'^\+?[\d\s\-\(\)]{10,15}$', phone):
+        return jsonify({"error": "Invalid phone format"}), 400
 
     try:
-        # Verify the Firebase ID token with clock skew tolerance
         decoded_token = auth.verify_id_token(id_token, clock_skew_seconds=60)
         email = decoded_token.get('email')
         
         if not email:
             return jsonify({"error": "Email not found in token"}), 400
+        
+        # ADD email validation
+        if len(email) > 255 or not re.match(r'^[^@]+@[^@]+\.[^@]+$', email):
+            return jsonify({"error": "Invalid email format"}), 400
 
     except Exception as e:
-        return jsonify({"error": "Invalid token: " + str(e)}), 401
+        logger.warning(f"Firebase token verification failed: {e}")
+        return jsonify({"error": "Invalid token"}), 401
 
     conn, cursor = get_db_connection()
 
-    # Check if user exists
     cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
     user = cursor.fetchone()
 
     if not user:
-        # Create minimal record (default role: student)
         cursor.execute("""
             INSERT INTO users (email, name, phone, role)
             VALUES (%s, %s, %s, %s)
@@ -388,30 +438,25 @@ def firebase_login():
         cursor.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
         user = cursor.fetchone()
 
-    # Create session with correct keys
     session["user_id"] = user["id"]
     session["user_email"] = user["email"]
     session["user_name"] = user["name"] or email.split('@')[0]
     session["role"] = user.get("role", "student") if isinstance(user, dict) else "student"
     session.permanent = True
 
-    cursor.close()
-    conn.close()
-
-    # Check if profile is incomplete
-    # Check if profile is incomplete
     need_profile = (user["name"] is None or user["name"] == "") or (user["phone"] is None or user["phone"] == "")
 
+    logger.info(f"User login successful: {email}")
     return jsonify({
         "ok": True,
         "need_profile": bool(need_profile),
         "role": session["role"]
     })
 
-
 # Admin Route Protection & Notifications ---
 
 @app.route("/complete-profile", methods=["GET", "POST"])
+@login_required
 def complete_profile():
     if "user_id" not in session:  # This should match what you set in firebase-login
         return redirect("/login")
@@ -441,13 +486,24 @@ def complete_profile():
     return render_template("complete_profile.html")
 
 @app.route('/admin/dashboard')
+@admin_required
 def admin_dashboard():
-    conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
         return redirect('/admin/login')
-
+    
+    conn, cursor = get_db_connection()
+    
     status_filter = request.args.get('status', 'all')
     sort_by = request.args.get('sort', 'newest')
+    
+    # SECURITY FIX: Validate parameters
+    allowed_statuses = ['all', 'pending', 'confirmed', 'delivered', 'cancelled']
+    allowed_sorts = ['newest', 'oldest']
+    
+    if status_filter not in allowed_statuses:
+        status_filter = 'all'
+    if sort_by not in allowed_sorts:
+        sort_by = 'newest'
     
     query = """
     SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
@@ -494,6 +550,7 @@ def admin_dashboard():
                            selected_sort=sort_by)
 
 @app.route('/admin/foods')
+@admin_required
 def admin_foods():
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -511,6 +568,7 @@ def admin_foods():
     return render_template('admin_foods.html', foods=foods)
 
 @app.route('/admin/add-food', methods=['GET', 'POST'])
+@admin_required
 def add_food():
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -542,6 +600,7 @@ def add_food():
     return render_template('add_food.html')
 
 @app.route('/admin/foods/edit/<int:food_id>', methods=['GET', 'POST'])
+@admin_required
 def edit_food(food_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -591,6 +650,7 @@ def edit_food(food_id):
     return render_template('edit_food.html', food=food)
 
 @app.route('/admin/foods/delete/<int:food_id>', methods=['POST'])
+@admin_required
 def delete_food(food_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -601,6 +661,7 @@ def delete_food(food_id):
     return redirect('/admin/foods')
 
 @app.route('/admin/todays-menu', methods=['GET', 'POST'])
+@admin_required
 def admin_todays_menu():
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -769,6 +830,7 @@ def admin_todays_menu():
                             default_lunch_end=default_lunch_end)
 
 @app.route('/admin/deliver/<int:order_id>', methods=['POST'])
+@admin_required
 def mark_delivered(order_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -787,12 +849,14 @@ def mark_delivered(order_id):
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/logout',methods=['POST'])
+@admin_required
 def admin_logout():
     session.pop('admin_logged_in', None)
     session.pop('admin_username', None)
     return redirect('/admin/login')
 
 @app.route('/admin/collect/<int:order_id>', methods=['POST'])
+@admin_required
 def admin_mark_as_collected(order_id):
     try:
         conn, cursor = get_db_connection()
@@ -826,6 +890,7 @@ def admin_mark_as_collected(order_id):
 
 
 @app.route('/admin/confirm-token', methods=['POST'])
+@admin_required
 def confirm_by_token():
     conn, cursor = get_db_connection()
     token = request.form['token']
@@ -849,6 +914,7 @@ def confirm_by_token():
     return jsonify({'success': False, 'error': 'Invalid or already processed token.'})
 
 @app.route('/admin/order/<int:order_id>')
+@admin_required
 def admin_view_order(order_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -879,6 +945,7 @@ def admin_view_order(order_id):
     return render_template("admin_order_view.html", order=order_main_info, items=items, is_confirmable_now=is_confirmable_now)
 
 @app.route('/admin/orders/confirm/<int:order_id>', methods=['POST'])
+@admin_required
 def confirm_order(order_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -900,6 +967,7 @@ def confirm_order(order_id):
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/food/sell/<int:food_id>', methods=['POST'])
+@admin_required
 def manual_sell(food_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -918,6 +986,7 @@ def manual_sell(food_id):
     return redirect('/admin/foods')
 
 @app.route('/admin/scan-qr')
+@admin_required
 def scan_qr():
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -926,6 +995,7 @@ def scan_qr():
     return render_template('scan_qr.html', order=None)
 
 @app.route('/admin/scan_order/<int:order_id>')
+@admin_required
 def scan_order(order_id):
     conn, cursor = get_db_connection()
     if not session.get('admin_logged_in'):
@@ -953,6 +1023,7 @@ def scan_order(order_id):
 
     return render_template("scan_qr.html", order=order_main_info, items=items, is_confirmable_now=is_confirmable_now)
 @app.route('/admin/uncollected-tokens')
+@admin_required
 def get_uncollected_tokens():
     conn, cursor = get_db_connection()
 
@@ -986,6 +1057,7 @@ def live_stock():
 
 
 @app.route('/home')
+@login_required
 def home():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1009,6 +1081,7 @@ def home():
     return render_template("index.html", foods=foods)
 
 @app.route('/food/<int:food_id>')
+@login_required
 def food_detail(food_id):
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1030,6 +1103,7 @@ def food_detail(food_id):
     return render_template("food_detail.html", food=food)
 
 @app.route('/cart')
+@login_required
 def cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1051,6 +1125,8 @@ def cart():
     return render_template('cart.html', cart_items=cart_items)
 
 @app.route('/order/single', methods=['POST'])
+@login_required
+@limiter.limit("10 per minute")
 def order_single():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
@@ -1103,12 +1179,15 @@ def order_single():
         return jsonify({'success': False, 'error': 'Could not create order.'}), 500
 
 @app.route('/cart/order', methods=['POST'])
+@login_required
+@limiter.limit("5 per minute")  # ADD this line
 def order_all_from_cart():
-    conn, cursor = get_db_connection()
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
     user_id = session.get('user_id')
+    conn, cursor = get_db_connection()
+    
     try:
         cursor.execute("""
             SELECT ci.food_id, ci.quantity, fi.price 
@@ -1117,21 +1196,39 @@ def order_all_from_cart():
             WHERE ci.user_id = %s
         """, (user_id,))
         items = cursor.fetchall()
+        
         if not items:
             return jsonify({'success': False, 'error': 'Cart is empty'}), 400
 
-        # ✅ Convert Decimals to float
+        # SECURITY FIX: Validate stock for all items
         for item in items:
-            item['quantity'] = int(item['quantity'])  # ensure integer
-            item['price'] = float(item['price'])      # convert Decimal to float
+            cursor.execute("""
+                SELECT stock FROM daily_menu 
+                WHERE food_id = %s AND DATE(available_date) = CURDATE()
+            """, (item['food_id'],))
+            stock_row = cursor.fetchone()
+            if not stock_row or stock_row['stock'] < item['quantity']:
+                cursor.execute("SELECT name FROM food_items WHERE id = %s", (item['food_id'],))
+                food_name = cursor.fetchone()['name']
+                return jsonify({'success': False, 'error': f'{food_name} is out of stock'}), 400
+
+        # Convert Decimals to float
+        for item in items:
+            item['quantity'] = int(item['quantity'])
+            item['price'] = float(item['price'])
 
         total = sum(item['price'] * item['quantity'] for item in items)
+        
+        # SECURITY FIX: Validate total amount
+        if total <= 0 or total > 50000:  # Reasonable max limit
+            return jsonify({'success': False, 'error': 'Invalid order total'}), 400
+            
         token = _generate_daily_token_number()
 
         notes = {
             "user_id": str(user_id),
             "token_number": str(token),
-            "items": json.dumps(items)  # ✅ No Decimal here now
+            "items": json.dumps(items)
         }
 
         razorpay_order = razorpay_client.order.create({
@@ -1146,25 +1243,25 @@ def order_all_from_cart():
             'razorpay_order_id': razorpay_order['id'],
             'amount': int(total * 100),
             'key_id': RAZORPAY_KEY_ID,
-            'user_name': session.get('name', 'Customer')
+            'user_name': session.get('user_name', 'Customer')
         })
-
 
     except Exception as e:
         print(f"Error creating cart order: {e}")
         return jsonify({'success': False, 'error': 'Could not create cart order.'}), 500
-
     
 @app.route('/payment/webhook', methods=['POST'])
 def payment_webhook():
     print("⚡ Webhook hit!")
     webhook_body_bytes = request.data
-    webhook_body_str = webhook_body_bytes.decode('utf-8')  # ✅ convert to string
+    webhook_body_str = webhook_body_bytes.decode('utf-8')
     webhook_signature = request.headers.get('X-Razorpay-Signature')
-    print(f"📦 Got signature: {webhook_signature}")
+    
+    if not webhook_signature:
+        print("❌ Missing webhook signature")
+        return 'Missing signature', 400
 
     try:
-        # ✅ Fix: Pass decoded string
         razorpay_client.utility.verify_webhook_signature(
             webhook_body_str,
             webhook_signature,
@@ -1178,37 +1275,52 @@ def payment_webhook():
     event = payload.get('event')
     print(f"🎯 Event received: {event}")
 
-    if event == 'payment.captured':  # or 'order.paid' if that’s what Razorpay sends
+    if event == 'payment.captured':
         try:
             payment_entity = payload['payload']['payment']['entity']
             razorpay_order_id = payment_entity['order_id']
             razorpay_payment_id = payment_entity['id']
+            amount_paid = payment_entity['amount']  # Amount in paisa
             notes = payment_entity.get('notes', {})
+
+            # Validate required fields
+            if not all([razorpay_order_id, razorpay_payment_id, notes.get('user_id'), notes.get('token_number')]):
+                print("❌ Missing required fields in webhook")
+                return 'Invalid payload', 400
 
             user_id = int(notes['user_id'])
             token_number = int(notes['token_number'])
 
             if 'items' in notes:
-                # 🛒 Cart order
                 items = json.loads(notes['items'])
             else:
-                # 🍽️ Single item order
                 items = [{
                     'food_id': int(notes['food_id']),
                     'quantity': int(notes['quantity']),
                     'price': float(notes['price'])
                 }]
 
-            total = sum(item['quantity'] * item['price'] for item in items)
+            # Verify payment amount matches order total
+            expected_total = sum(item['quantity'] * item['price'] for item in items)
+            if abs(amount_paid - (expected_total * 100)) > 1:
+                print(f"❌ Payment amount mismatch: expected {expected_total*100}, got {amount_paid}")
+                return 'Amount mismatch', 400
 
             conn, cursor = get_db_connection()
+
+            # CRITICAL: Check for duplicate processing
+            cursor.execute("SELECT id FROM orders WHERE razorpay_payment_id = %s", (razorpay_payment_id,))
+            if cursor.fetchone():
+                print(f"⚠️ Duplicate webhook for payment {razorpay_payment_id}")
+                return 'Already processed', 200
+
             cursor.execute("""
                 INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, razorpay_order_id, razorpay_payment_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (user_id, total, token_number, 'razorpay', 'paid', 'confirmed', razorpay_order_id, razorpay_payment_id))
+            """, (user_id, expected_total, token_number, 'razorpay', 'paid', 'confirmed', razorpay_order_id, razorpay_payment_id))
             order_id = cursor.lastrowid
 
-            # Save each item
+            # Save each item and update stock
             for item in items:
                 cursor.execute("""
                     INSERT INTO order_items (order_id, food_id, quantity, price)
@@ -1216,13 +1328,16 @@ def payment_webhook():
                 """, (order_id, item['food_id'], item['quantity'], item['price']))
 
                 cursor.execute("""
-                    UPDATE daily_menu SET stock = stock - %s
+                    UPDATE daily_menu SET stock = GREATEST(stock - %s, 0)
                     WHERE food_id = %s AND DATE(available_date) = CURDATE()
                 """, (item['quantity'], item['food_id']))
 
+            # Clear cart if it was a cart order
+            if 'items' in notes:
+                cursor.execute("DELETE FROM cart_items WHERE user_id = %s", (user_id,))
+
             conn.commit()
 
-            # Remove admin notification
             create_notification(
                user_id=user_id,
                message=f"Payment successful! Your order #{token_number} is confirmed.",
@@ -1245,6 +1360,8 @@ def payment_webhook():
 
 
 @app.route('/cart/add', methods=['POST'])
+@login_required  # ADD this line  
+@limiter.limit("30 per minute")
 def add_to_cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1299,6 +1416,7 @@ def add_to_cart():
 
 
 @app.route('/cart/update', methods=['POST'])
+@login_required
 def update_cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1317,6 +1435,7 @@ def update_cart():
     return '', 204
 
 @app.route('/cart/remove', methods=['POST'])
+@login_required
 def remove_cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1331,6 +1450,7 @@ def remove_cart():
     return '', 204
 
 @app.route('/order/cancel/<int:order_id>', methods=['POST'])
+@login_required
 def cancel_order(order_id):
     conn, cursor = get_db_connection()
     user_id = session.get('user_id')
@@ -1380,6 +1500,7 @@ def cancel_order(order_id):
         return jsonify({'success': False, 'error': 'A database error occurred.'}), 500
 
 @app.route('/settings')
+@login_required
 def settings():
     if not session.get('user_id'):
         return redirect('/login')
@@ -1393,11 +1514,13 @@ def settings():
     return render_template('settings.html', user=user)
 
 @app.route('/logout', methods=['POST'])
+@login_required
 def logout():
     session.clear() 
     return redirect('/login')
 
 @app.route('/orders')
+@login_required
 def orders():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1444,6 +1567,19 @@ def orders():
             past_orders.append(order)
 
     return render_template('orders.html', today_orders=today_orders, past_orders=past_orders)
+
+@app.errorhandler(mysql.connector.Error)
+def handle_db_error(error):
+    print(f"Database error: {error}")
+    return jsonify({'error': 'Database operation failed'}), 500
+
+@app.errorhandler(413)
+def request_entity_too_large(error):
+    return jsonify({'error': 'File too large. Max 5MB allowed.'}), 413
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({'error': 'Too many requests. Please try again later.'}), 429
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0",debug=True, port=5055)
