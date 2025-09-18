@@ -7,7 +7,48 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
   <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  
+  <style>
+    .deliver-button {
+      background-color: #28a745;
+      color: white;
+      border: none;
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      transition: all 0.3s ease;
+      min-width: 200px;
+    }
+    
+    .deliver-button:hover {
+      background-color: #218838;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0, 0, 0, 0.3);
+    }
+    
+    .deliver-button:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+    
+    .deliver-button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+    
+    .order-detail {
+      max-width: 600px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+  </style>
     
 </head>
 <body class="home-body has-bottom-nav">
@@ -56,11 +97,11 @@
       </div>
 
       {# Conditional buttons based on order status #}
-      <div id="action-buttons-container">
+      <div id="action-buttons-container" style="margin: 20px 0; text-align: center;">
           {% if order.status == 'pending' %}
               <button class="mark-btn confirm" onclick="processOrderAction('/admin/confirm-token', '{{ order.token_number }}', 'confirm')">Confirm Order (via QR)</button>
           {% elif order.status == 'confirmed' %}
-              <button class="mark-btn deliver" onclick="processOrderAction('/admin/collect/{{ order.order_id }}', null, 'collect')">Mark as Collected (via QR)</button>
+              <button id="deliver-btn" class="deliver-button" onclick="processOrderAction('/admin/collect/{{ order.order_id }}', null, 'collect')">Mark as Collected (via QR)</button>
           {% elif order.status == 'delivered' or order.status == 'collected' %}
         <button class="mark-btn" disabled>Already {{ order.status|capitalize }}</button>
       {% endif %}

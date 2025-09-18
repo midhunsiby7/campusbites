@@ -46,7 +46,10 @@
         <form action="/admin/todays-menu?action=delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the entire menu for today?');">
           <button type="submit" class="btn btn-danger">Delete Menu</button>
         </form>
+
+
       </div>
+      
     </div>
 
     <!-- ✅ SHOW EDIT MENU FORM ONLY IF ?edit=true -->
@@ -104,6 +107,9 @@
     <!-- ✅ SET MENU FOR TODAY IF EMPTY -->
     <div class="form-container menu-form">
       <h2>Set Menu for Today</h2>
+              <form action="/admin/menu/autoset-now" method="POST" style="margin:1rem 0;">
+<button id="runAutoMenuBtn" class="btn">Run Auto Menu Now</button>
+</form>
       <form method="POST" action="/admin/todays-menu?action=set">
         <div class="time-inputs">
           <div>
@@ -145,8 +151,21 @@
     </div>
   {% endif %}
 </main>
-
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
+document.getElementById("runAutoMenuBtn").addEventListener("click", () => {
+  fetch("/admin/run-auto-menu", { method: "POST" })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        Swal.fire("Success!", data.message, "success").then(() => location.reload());
+      } else {
+        Swal.fire("Error!", data.message, "error");
+      }
+    })
+    .catch(() => Swal.fire("Error!", "Something went wrong.", "error"));
+});
+
   document.addEventListener("DOMContentLoaded", () => {
     if (window.location.search.includes("edit=true")) {
       const form = document.getElementById("edit-menu-form");

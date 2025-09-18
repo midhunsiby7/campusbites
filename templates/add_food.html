@@ -6,60 +6,15 @@
   <title>Add New Food - CAMPUSBITES</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <style>
-    .form-container {
-      max-width: 500px;
-      margin: 2rem auto;
-      background: #fff;
-      padding: 2rem;
-      border-radius: 12px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-    }
-
-    .form-container h2 {
-      color: #ff7f50;
-      text-align: center;
-      margin-bottom: 1.5rem;
-    }
-
-    .form-group {
-      margin-bottom: 1rem;
-    }
-
-    .form-group label {
-      display: block;
-      font-weight: bold;
-      margin-bottom: 0.4rem;
-    }
-
-    .form-group input,
-    .form-group select,
-    .form-group textarea {
-      width: 100%;
-      padding: 0.8rem;
-      border: 1px solid #ccc;
-      border-radius: 8px;
-      font-size: 1rem;
-    }
-
-    .form-group textarea {
-      resize: vertical;
-    }
-
-    button {
-      background-color: #ff7f50;
-      color: white;
-      border: none;
-      padding: 0.9rem 1.5rem;
-      font-size: 1rem;
-      border-radius: 8px;
-      cursor: pointer;
-      width: 100%;
-      font-weight: bold;
-    }
-
-    button:hover {
-      background-color: #ff5722;
-    }
+    .form-container { max-width: 500px; margin: 2rem auto; background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+    .form-container h2 { color: #ff7f50; text-align: center; margin-bottom: 1.5rem; }
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-weight: bold; margin-bottom: 0.4rem; }
+    .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 0.8rem; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; }
+    .form-group textarea { resize: vertical; }
+    button { background-color: #ff7f50; color: white; border: none; padding: 0.9rem 1.5rem; font-size: 1rem; border-radius: 8px; cursor: pointer; width: 100%; font-weight: bold; }
+    button:hover { background-color: #ff5722; }
+    .hidden { display: none; }
   </style>
 </head>
 <body class="home-body has-bottom-nav">
@@ -67,28 +22,108 @@
   <div class="form-container">
     <h2>Add New Food</h2>
     <form action="/admin/add-food" method="POST" enctype="multipart/form-data">
-  <label for="name">Food Name:</label>
-  <input type="text" name="name" required><br>
+      <div class="form-group">
+        <label for="name">Food Name:</label>
+        <input type="text" name="name" id="name" required>
+      </div>
 
-  <label for="price">Price:</label>
-  <input type="number" name="price" required><br>
+      <div class="form-group">
+        <label for="price">Price (₹):</label>
+        <input type="number" name="price" id="price" step="0.01" required>
+      </div>
 
-  <label for="category">Category:</label>
-  <select name="category" required>
-    <option value="breakfast">Breakfast</option>
-    <option value="lunch">Lunch</option>
-  </select><br>
+      <div class="form-group">
+        <label for="category">Category:</label>
+        <select name="category" id="category" required>
+          <option value="breakfast">Breakfast</option>
+          <option value="lunch">Lunch</option>
+        </select>
+      </div>
 
-  <label for="about">Description:</label>
-  <textarea name="about" rows="3"></textarea><br>
+      <div class="form-group">
+        <label for="about">Description:</label>
+        <textarea name="about" id="about" rows="3"></textarea>
+      </div>
 
-  <label for="image">Food Image:</label>
-  <input type="file" name="image" accept="image/*" required><br><br>
+      <div class="form-group">
+        <label>Available Days:</label>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.25rem;text-align:left;">
+          <label><input type="checkbox" name="days" value="mon" checked> Mon</label>
+          <label><input type="checkbox" name="days" value="tue" checked> Tue</label>
+          <label><input type="checkbox" name="days" value="wed" checked> Wed</label>
+          <label><input type="checkbox" name="days" value="thu" checked> Thu</label>
+          <label><input type="checkbox" name="days" value="fri" checked> Fri</label>
+          <label><input type="checkbox" name="days" value="sat"> Sat</label>
+          <label><input type="checkbox" name="days" value="sun"> Sun</label>
+        </div>
+      </div>
 
-  <button type="submit">Add Food</button>
-</form>
+      <hr>
 
+      <!-- Breakfast defaults -->
+      <div class="form-group breakfast-default">
+        <label for="default_breakfast_start">Default Breakfast Start</label>
+        <input type="time" name="default_breakfast_start" id="default_breakfast_start" data-default="08:00" value="08:00">
+      </div>
+      <div class="form-group breakfast-default">
+        <label for="default_breakfast_end">Default Breakfast End</label>
+        <input type="time" name="default_breakfast_end" id="default_breakfast_end" data-default="11:00" value="11:00">
+      </div>
+
+      <!-- Lunch defaults -->
+      <div class="form-group lunch-default">
+        <label for="default_lunch_start">Default Lunch Start</label>
+        <input type="time" name="default_lunch_start" id="default_lunch_start" data-default="12:00" value="12:00">
+      </div>
+      <div class="form-group lunch-default">
+        <label for="default_lunch_end">Default Lunch End</label>
+        <input type="time" name="default_lunch_end" id="default_lunch_end" data-default="15:00" value="15:00">
+      </div>
+
+      <div class="form-group">
+        <label for="default_stock">Default Stock:</label>
+        <input type="number" name="default_stock" id="default_stock" min="0" value="0" required>
+      </div>
+
+      <div class="form-group">
+        <label for="image">Food Image:</label>
+        <input type="file" name="image" id="image" accept="image/*" required>
+      </div>
+
+      <button type="submit">Add Food</button>
+    </form>
   </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const catSelect = document.querySelector('select[name="category"]');
+  const breakfastFields = document.querySelectorAll('.breakfast-default');
+  const lunchFields = document.querySelectorAll('.lunch-default');
+
+  const breakfastStart = document.querySelector('input[name="default_breakfast_start"]');
+  const breakfastEnd   = document.querySelector('input[name="default_breakfast_end"]');
+  const lunchStart     = document.querySelector('input[name="default_lunch_start"]');
+  const lunchEnd       = document.querySelector('input[name="default_lunch_end"]');
+
+  function toggleFields() {
+    const cat = catSelect.value;
+    if (cat === 'breakfast') {
+      breakfastFields.forEach(el => el.style.display = 'block');
+      lunchFields.forEach(el => el.style.display = 'none');
+      if (!breakfastStart.value) breakfastStart.value = breakfastStart.dataset.default || '08:00';
+      if (!breakfastEnd.value) breakfastEnd.value = breakfastEnd.dataset.default || '11:00';
+    } else {
+      breakfastFields.forEach(el => el.style.display = 'none');
+      lunchFields.forEach(el => el.style.display = 'block');
+      if (!lunchStart.value) lunchStart.value = lunchStart.dataset.default || '12:00';
+      if (!lunchEnd.value) lunchEnd.value = lunchEnd.dataset.default || '15:00';
+    }
+  }
+
+  catSelect.addEventListener('change', toggleFields);
+  toggleFields();
+});
+</script>
 
 </body>
 </html>

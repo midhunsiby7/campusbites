@@ -44,6 +44,23 @@
       color: white;
       border: none;
     }
+    .error-box {
+  background: #ffe5e5;
+  color: #d8000c;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 5px;
+  font-size: 14px;
+  border: 1px solid #d8000c;
+  display: none;
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
   </style>
 </head>
 <body>
@@ -61,6 +78,8 @@
 <button class="login-btn" id="emailLogin">Login</button>
 <button class="register-btn" id="emailRegister">Register</button>
   
+<div id="error-box" class="error-box" style="display:none;"></div>
+
 </div>
 
 
@@ -69,6 +88,12 @@
 import { getAuth, GoogleAuthProvider, signInWithPopup, 
          signInWithEmailAndPassword, createUserWithEmailAndPassword } 
   from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+function showError(message) {
+  const box = document.getElementById("error-box");
+  box.innerText = message;
+  box.style.display = "block";
+}
 
 // Fetch Firebase config from backend
 const config = await fetch("/firebase-config").then(res => res.json());
@@ -86,7 +111,7 @@ document.getElementById("googleLogin").addEventListener("click", async (event) =
     const idToken = await auth.currentUser.getIdToken(true);
     await sendIdTokenToBackend(idToken);
   } catch (error) {
-    alert("Google login failed: " + error.message);
+    showError("Google login failed: " + error.message);
   }
 });
 
@@ -96,7 +121,7 @@ document.getElementById("emailLogin").addEventListener("click", async (event) =>
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value.trim();
 
-  if (!email || !password) return alert("Please enter email and password");
+  if (!email || !password) return showError("Plese Provide both Email and Password");
 
   try {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -104,7 +129,7 @@ document.getElementById("emailLogin").addEventListener("click", async (event) =>
     const idToken = await auth.currentUser.getIdToken(true);
     await sendIdTokenToBackend(idToken);
   } catch (error) {
-    alert("Login failed: " + error.message);
+    showError("Email login failed: " + error.message);
   }
 });
 
@@ -124,7 +149,7 @@ document.getElementById("emailRegister").addEventListener("click", async (event)
     // ✅ Don't pass name and phone - let backend handle it
     await sendIdTokenToBackend(idToken);
   } catch (error) {
-    alert("Registration failed: " + error.message);
+    showError("Registration failed: " + error.message);
   }
 });
 
@@ -146,7 +171,7 @@ async function sendIdTokenToBackend(idToken, name = null, phone = null) {
       window.location.href = "/home";
     }
   } else {
-    alert("Backend error: " + (data.error || "Unknown error"));
+    showError("Backend Error: " + error.message);
   }
 }
 </script>

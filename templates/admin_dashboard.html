@@ -27,11 +27,8 @@
       <div class="filter-row">
         <select name="status" id="statusFilter">
           <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
-          <option value="paid" {% if selected_status == 'paid' %}selected{% endif %}>Paid</option>
           <option value="confirmed" {% if selected_status == 'confirmed' %}selected{% endif %}>Confirmed</option>
           <option value="delivered" {% if selected_status == 'delivered' %}selected{% endif %}>Delivered</option>
-          <option value="collected" {% if selected_status == 'collected' %}selected{% endif %}>Collected</option>
-          <option value="cancelled" {% if selected_status == 'cancelled' %}selected{% endif %}>Cancelled</option>
         </select>
         <select name="sort" id="sortSelect">
           <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>Newest First</option>
@@ -169,7 +166,7 @@ async function liveUpdateDashboard() {
 
 document.addEventListener('DOMContentLoaded', () => {
   filterTable();
-  setInterval(liveUpdateDashboard, 7000);
+  setInterval(liveUpdateDashboard, 5000);
 });
 
 // Preserve scroll position

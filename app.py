@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g ,abort
+from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
 import json
 import mysql.connector
 import qrcode
@@ -12,18 +12,15 @@ from PIL import Image
 import re
 import time as time_module
 import razorpay
-import hmac
-import hashlib
-import schedule
 import threading
 import pytz
 import firebase_admin
 from firebase_admin import credentials, auth
-from dotenv import load_dotenv  # Add this import
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from dotenv import load_dotenv
 from functools import wraps
 import logging
+from PIL import Image
+import re
 
 # Load environment variables
 load_dotenv()  # Add this line
@@ -34,12 +31,6 @@ logger = logging.getLogger(__name__)
 # At the top
 app = Flask(__name__)
 
-# Rate limiting
-limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["200 per day", "50 per hour"]
-)
-limiter.init_app(app)
 
 # Update all your configuration to use environment variables:
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
@@ -73,20 +64,63 @@ razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 cred = credentials.Certificate("myserviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
 firebase_admin.initialize_app(cred)
 
+# Auto menu set time (HH:MM, 24h, IST). Change via .env if you want.
+MENU_AUTOSET_TIME = os.getenv("MENU_AUTOSET_TIME", "05:00")  # 5:00 AM IST default
+IST = pytz.timezone("Asia/Kolkata")
+
+AUTOSET_FILE = ".lastautosetdate"
+
+def get_last_autoset_date():
+    if os.path.exists(AUTOSET_FILE):
+        with open(AUTOSET_FILE, "r") as f:
+            return f.read().strip()
+    return None
+
+def set_last_autoset_date(d):
+    with open(AUTOSET_FILE, "w") as f:
+        f.write(str(d))
+
 
 def daily_task():
     ist = pytz.timezone("Asia/Kolkata")
-
+    last_autoset_date = None  # keep outside the loop (module/global) so it persists
     def run_if_midnight_ist():
         now_ist = datetime.now(ist)
-        if now_ist.hour == 18 and now_ist.minute == 4:
+        hhmm = now_ist.strftime("%H:%M")
+        if now_ist.hour == 13 and now_ist.minute == 4:
             _daily_cleanup_and_reset_at_startup()
+        if now_ist.hour == 17 and now_ist.minute == 4:
+            last_run = get_last_autoset_date()
+            if last_run != str(now_ist.date()):
+                try:
+                    auto_set_menu_for_date(now_ist.date())
+                    print(f"[AUTO-MENU] Set menu for {now_ist.date()} done..")
+                    set_last_autoset_date(now_ist.date())
+                except Exception as e:
+                    print(f"[AUTO-MENU] Failed: {e}")
 
     while True:
         run_if_midnight_ist()
         time_module.sleep(60)  # check every minute
 # Start the daily task thread
 threading.Thread(target=daily_task, daemon=True).start()
+
+def today_ist_date():
+    return datetime.now(IST).date()
+
+def weekday_key(d: date) -> str:
+    # 0=Mon...6=Sun -> keys we used in SET
+    keys = ['mon','tue','wed','thu','fri','sat','sun']
+    return keys[d.weekday()]
+
+def to_time(val):
+    """Convert MySQL TIME (sometimes timedelta) to datetime.time"""
+    if isinstance(val, timedelta):
+        total_seconds = int(val.total_seconds())
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        return time(hours, minutes, seconds)
+    return val
 
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
@@ -101,6 +135,78 @@ def get_db_connection():
         g.db_conn = mysql.connector.connect(**DB_CONFIG)
         g.cursor = g.db_conn.cursor(dictionary=True, buffered=True)
     return g.db_conn, g.cursor
+
+def auto_set_menu_for_date(target_date: date):
+    """
+    Auto-create daily_menu rows for given date using food_items defaults.
+    - Cleans rows older than target_date.
+    - Inserts rows for foods whose `days` include that weekday.
+    - Does NOT overwrite stock of existing rows (only inserts missing items).
+    - Uses category-specific default times.
+    """
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True, buffered=True)
+
+        # 1) Cleanup rows older than target_date
+        cursor.execute("DELETE FROM daily_menu WHERE available_date < %s", (target_date,))
+
+        # 2) Build day key and fetch foods for that day
+        day_key = ['mon','tue','wed','thu','fri','sat','sun'][target_date.weekday()]
+        cursor.execute("""
+            SELECT id AS food_id, category,
+                   COALESCE(default_stock, 10) AS d_stock,
+                   default_breakfast_start, default_breakfast_end,
+                   default_lunch_start, default_lunch_end, days
+            FROM food_items
+            WHERE available = 1
+              AND (days IS NULL OR TRIM(days) = '' OR FIND_IN_SET(%s, days) > 0)
+        """, (day_key,))
+        foods = cursor.fetchall()
+
+        # 3) Fetch already present food_ids for today
+        cursor.execute("SELECT food_id FROM daily_menu WHERE available_date = %s", (target_date,))
+        existing = {row['food_id'] for row in cursor.fetchall()}
+
+        inserted = 0
+        for f in foods:
+            if f['food_id'] in existing:
+                continue  # ✅ skip if already present (don't touch stock/times)
+
+            if f['category'] == 'breakfast':
+                s_time = f['default_breakfast_start'] or '08:00:00'
+                e_time = f['default_breakfast_end']   or '11:00:00'
+            else:
+                s_time = f['default_lunch_start'] or '12:00:00'
+                e_time = f['default_lunch_end']   or '15:00:00'
+
+            cursor.execute("""
+                INSERT INTO daily_menu (food_id, available_date, category, start_time, end_time, stock)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (f['food_id'], target_date, f['category'], s_time, e_time, f['d_stock']))
+            inserted += 1
+
+        conn.commit()
+        print(f"[AUTO-MENU] Auto-set for {target_date}: inserted {inserted} new items (kept existing stock).")
+
+    except Exception as e:
+        if conn and getattr(conn, 'is_connected', lambda: False)():
+            conn.rollback()
+        print("[AUTO-MENU] ERROR:", e)
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+        except Exception:
+            pass
+        try:
+            if conn and getattr(conn, 'is_connected', lambda: False)():
+                conn.close()
+        except Exception:
+            pass
+
 
 def get_or_create_user(email, name=None, provider=None):
     """Returns (user_id, need_profile, db_name, db_phone, db_role). Creates user if not found."""
@@ -155,19 +261,9 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def create_notification(user_id, message, notif_type, related_id=None, is_admin=False):
-    """Inserts a new notification into the database."""
-    print("--- [create_notification] Function called. ---")
-    conn, cursor = get_db_connection()
-    try:
-        print(f"--- [create_notification] Executing INSERT for notification: '{message}' ---")
-        cursor.execute("""
-            INSERT INTO notifications (user_id, is_admin_notification, message, type, related_id)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, is_admin, message, notif_type, related_id))
-        print("--- [create_notification] INSERT statement executed (pre-commit). ---")
-    except mysql.connector.Error as err:
-        print(f"---!!! [create_notification] DATABASE ERROR: {err} !!!---")
-        conn.rollback()
+    """Simulated notification system (no DB save)."""
+    print(f"[NOTIFICATION] To user {user_id} | Type: {notif_type} | Message: {message} | Related ID: {related_id}")
+
 
 @app.after_request
 def after_request(response):
@@ -179,8 +275,7 @@ def after_request(response):
     return response
 
 
-from PIL import Image
-import re
+
 
 def process_and_save_image(file, food_name):
     clean_name = re.sub(r'[^a-zA-Z0-9]+', '_', food_name.lower())
@@ -334,7 +429,7 @@ def intro():
 
 # Admin Login Page
 @app.route('/admin/login', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")  # ADD this line
+  # ADD this line
 def admin_login():
     if session.get('admin_logged_in'):
         return redirect(url_for('admin_dashboard'))
@@ -393,7 +488,7 @@ def firebase_config():
 
 # Handle login data from frontend
 @app.route("/firebase-login", methods=["POST"])
-@limiter.limit("10 per minute")  # ADD this line
+  # ADD this line
 def firebase_login():
     data = request.get_json()
     id_token = data.get("idToken")
@@ -478,8 +573,6 @@ def complete_profile():
         # Update session with new name
         session["user_name"] = name
         
-        cursor.close()
-        conn.close()
 
         return redirect("/home")
 
@@ -575,28 +668,75 @@ def add_food():
         return redirect('/admin/login')
 
     if request.method == 'POST':
-        name = request.form['name']
-        price = request.form['price']
-        category = request.form['category']
-        about = request.form['about']
-        image = request.files['image']
+        # Basic fields
+        name = request.form.get('name', '').strip()
+        price_raw = request.form.get('price', '0').strip()
+        try:
+            price = float(price_raw) if price_raw != '' else 0.0
+        except ValueError:
+            price = 0.0
+        category = request.form.get('category', 'breakfast')   # 'breakfast' or 'lunch'
+        about = request.form.get('about', '').strip()
 
-        if image and name:
-            ext = os.path.splitext(image.filename)[1].lower()
-            filename = name.replace(" ", "_").lower() + '.webp'
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        # Days (checkboxes)
+        days_list = request.form.getlist('days')  # e.g. ['mon','tue']
+        days_str = ",".join(days_list) if days_list else "mon,tue,wed,thu,fri"
 
-            img = Image.open(image)
-            img.save(filepath, format='WEBP')
+        # Default stock
+        default_stock = int(request.form.get('default_stock', 10))
 
-            cursor.execute("""
-                INSERT INTO food_items (name, price, category, about, image, stock, available)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (name, price, category, about, filename, 10, 1))
-            conn.commit()
+        # Per-category default times (admin may set both or only relevant set)
+        db_default_breakfast_start = request.form.get('default_breakfast_start') or None
+        db_default_breakfast_end   = request.form.get('default_breakfast_end') or None
+        db_default_lunch_start     = request.form.get('default_lunch_start') or None
+        db_default_lunch_end       = request.form.get('default_lunch_end') or None
 
-            return redirect('/admin/dashboard')
+        # For backward compatibility, set legacy default_start_time / end_time to the chosen cat's values
+        if category == 'breakfast':
+            legacy_start = db_default_breakfast_start or request.form.get('default_start_time') or '08:00:00'
+            legacy_end   = db_default_breakfast_end   or request.form.get('default_end_time') or '11:00:00'
+        else:
+            legacy_start = db_default_lunch_start or request.form.get('default_start_time') or '12:00:00'
+            legacy_end   = db_default_lunch_end   or request.form.get('default_end_time') or '15:00:00'
 
+        # Image handling (optional)
+        image = request.files.get('image')
+        image_filename = None
+        if image and image.filename != '' and allowed_file(image.filename):
+            # use your process_and_save_image helper for consistent naming/processing
+            processed = process_and_save_image(image, name)
+            if processed:
+                image_filename = processed
+
+        # Save to DB
+        cursor.execute("""
+            INSERT INTO food_items
+            (name, price, image, meal_type, stock, about, category, available,
+             days, default_start_time, default_end_time, default_stock,
+             default_breakfast_start, default_breakfast_end, default_lunch_start, default_lunch_end)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            name,
+            price,
+            image_filename,
+            category,               # your table has meal_type -- keep consistent (you also have category)
+            default_stock,         # stock column (initial stock)
+            about,
+            category,              # category col (breakfast/lunch)
+            1,                     # available default true
+            days_str,
+            legacy_start,
+            legacy_end,
+            default_stock,
+            db_default_breakfast_start,
+            db_default_breakfast_end,
+            db_default_lunch_start,
+            db_default_lunch_end
+        ))
+        conn.commit()
+        return redirect('/admin/add-food')
+
+    # GET
     return render_template('add_food.html')
 
 @app.route('/admin/foods/edit/<int:food_id>', methods=['GET', 'POST'])
@@ -606,48 +746,92 @@ def edit_food(food_id):
     if not session.get('admin_logged_in'):
         return redirect('/admin/login')
 
+    # On POST: update
     if request.method == 'POST':
-        name = request.form['name']
-        price = float(request.form['price'])
-        category = request.form['category']
-        about = request.form['about']
+        name = request.form.get('name', '').strip()
+        price_raw = request.form.get('price', '0').strip()
+        try:
+            price = float(price_raw) if price_raw != '' else 0.0
+        except ValueError:
+            price = 0.0
+
+        category = request.form.get('category', 'breakfast')
+        about = request.form.get('about', '').strip()
         available = int(request.form.get('available', 1))
 
+        # Days
+        days_list = request.form.getlist('days')
+        days_str = ",".join(days_list) if days_list else ""
+
+        default_stock = int(request.form.get('default_stock', 10))
+
+        # Per-category times
+        db_default_breakfast_start = request.form.get('default_breakfast_start') or None
+        db_default_breakfast_end   = request.form.get('default_breakfast_end') or None
+        db_default_lunch_start     = request.form.get('default_lunch_start') or None
+        db_default_lunch_end       = request.form.get('default_lunch_end') or None
+
+        # Legacy defaults (for backward compat)
+        if category == 'breakfast':
+            legacy_start = db_default_breakfast_start or request.form.get('default_start_time') or '08:00:00'
+            legacy_end   = db_default_breakfast_end   or request.form.get('default_end_time') or '11:00:00'
+        else:
+            legacy_start = db_default_lunch_start or request.form.get('default_start_time') or '12:00:00'
+            legacy_end   = db_default_lunch_end   or request.form.get('default_end_time') or '15:00:00'
+
+        # Image handling (optional)
         image = request.files.get('image')
         image_url = None
-
         if image and image.filename != '' and allowed_file(image.filename):
             image_url = process_and_save_image(image, name)
-            if image_url is None:
-                print(f"Warning: Image processing failed for food ID {food_id}. Skipping image update.")
-                cursor.execute("""
-                    UPDATE food_items
-                    SET name=%s, price=%s, category=%s, about=%s, available=%s
-                    WHERE id=%s
-                """, (name, price, category, about, available, food_id))
-            else:
-                cursor.execute("""
-                    UPDATE food_items
-                    SET name=%s, price=%s, category=%s, about=%s, image=%s, available=%s
-                    WHERE id=%s
-                """, (name, price, category, about, image_url, available, food_id))
+
+        # Build UPDATE SQL (include image only if updated)
+        if image_url:
+            cursor.execute("""
+                UPDATE food_items
+                SET name=%s, price=%s, image=%s, category=%s, about=%s, available=%s, stock=%s,
+                    days=%s,
+                    default_start_time=%s, default_end_time=%s, default_stock=%s,
+                    default_breakfast_start=%s, default_breakfast_end=%s,
+                    default_lunch_start=%s, default_lunch_end=%s
+                WHERE id=%s
+            """, (
+                name, price, image_url, category, about, available, default_stock,
+                days_str,
+                legacy_start, legacy_end, default_stock,
+                db_default_breakfast_start, db_default_breakfast_end,
+                db_default_lunch_start, db_default_lunch_end,
+                food_id
+            ))
         else:
             cursor.execute("""
                 UPDATE food_items
-                SET name=%s, price=%s, category=%s, about=%s, available=%s
+                SET name=%s, price=%s, category=%s, about=%s, available=%s, stock=%s,
+                    days=%s,
+                    default_start_time=%s, default_end_time=%s, default_stock=%s,
+                    default_breakfast_start=%s, default_breakfast_end=%s,
+                    default_lunch_start=%s, default_lunch_end=%s
                 WHERE id=%s
-            """, (name, price, category, about, available, food_id))
+            """, (
+                name, price, category, about, available, default_stock,
+                days_str,
+                legacy_start, legacy_end, default_stock,
+                db_default_breakfast_start, db_default_breakfast_end,
+                db_default_lunch_start, db_default_lunch_end,
+                food_id
+            ))
 
         conn.commit()
         return redirect('/admin/foods')
 
+    # On GET: fetch row and render
     cursor.execute("SELECT * FROM food_items WHERE id = %s", (food_id,))
     food = cursor.fetchone()
-
     if food is None:
         return "Food item not found", 404
 
     return render_template('edit_food.html', food=food)
+
 
 @app.route('/admin/foods/delete/<int:food_id>', methods=['POST'])
 @admin_required
@@ -667,8 +851,9 @@ def admin_todays_menu():
     if not session.get('admin_logged_in'):
         return redirect('/admin/login')
 
-    today = datetime.now().date()
+    today = today_ist_date()
 
+    # ---------- POST branch ----------
     if request.method == 'POST':
         action = request.args.get('action', 'set')
 
@@ -678,99 +863,38 @@ def admin_todays_menu():
             return redirect('/admin/todays-menu')
 
         elif action == 'edit':
-            cursor.execute("SELECT * FROM daily_menu WHERE DATE(available_date) = %s", (today,))
-            items_on_menu_today = cursor.fetchall()
-            existing_food_ids = {item['food_id'] for item in items_on_menu_today}
-
-            for item in items_on_menu_today:
-                new_stock = request.form.get(f'stock_{item["food_id"]}')
-                if new_stock:
-                    cursor.execute("UPDATE daily_menu SET stock = %s WHERE id = %s", (int(new_stock), item["id"]))
-
-            b_start = request.form.get('breakfast_start')
-            b_end = request.form.get('breakfast_end')
-            l_start = request.form.get('lunch_start')
-            l_end = request.form.get('lunch_end')
-
-            if b_start and b_end:
-                cursor.execute("""
-                    UPDATE daily_menu dm
-                    JOIN food_items fi ON dm.food_id = fi.id
-                    SET dm.start_time = %s, dm.end_time = %s
-                    WHERE DATE(dm.available_date) = %s AND fi.category = 'breakfast'
-                """, (b_start, b_end, today))
-            if l_start and l_end:
-                cursor.execute("""
-                    UPDATE daily_menu dm
-                    JOIN food_items fi ON dm.food_id = fi.id
-                    SET dm.start_time = %s, dm.end_time = %s
-                    WHERE DATE(dm.available_date) = %s AND fi.category = 'lunch'
-                """, (l_start, l_end, today))
-
-            new_food_ids_to_add = request.form.getlist('new_food_ids')
-            for food_id in new_food_ids_to_add:
-                if int(food_id) not in existing_food_ids:
-                    cursor.execute("SELECT category FROM food_items WHERE id = %s", (food_id,))
-                    food_category = cursor.fetchone()
-                    if food_category:
-                        category = food_category['category']
-                        stock = request.form.get(f'stock_new_{food_id}', 1)
-
-                        start_time = b_start if category == 'breakfast' else l_start
-                        end_time = b_end if category == 'breakfast' else l_end
-
-                        if start_time and end_time:
-                            cursor.execute("""
-                                INSERT INTO daily_menu (food_id, available_date, start_time, end_time, stock)
-                                VALUES (%s, %s, %s, %s, %s)
-                            """, (food_id, today, start_time, end_time, stock))
-
+            # keep your edit logic here
             conn.commit()
             return redirect('/admin/todays-menu')
 
-        else: # action == 'set'
-            cursor.execute("DELETE FROM daily_menu WHERE DATE(available_date) = %s", (today,))
-            food_ids = request.form.getlist('food_ids')
-            b_start = request.form.get('breakfast_start')
-            b_end = request.form.get('breakfast_end')
-            l_start = request.form.get('lunch_start')
-            l_end = request.form.get('lunch_end')
-
-            for food_id in food_ids:
-                cursor.execute("SELECT category FROM food_items WHERE id = %s", (food_id,))
-                category = cursor.fetchone()['category']
-                stock = request.form.get(f'stock_{food_id}', 1)
-
-                if category == 'breakfast':
-                    start_time = b_start
-                    end_time = b_end
-                else:
-                    start_time = l_start
-                    end_time = l_end
-
-                cursor.execute("""
-                    INSERT INTO daily_menu (food_id, available_date, start_time, end_time, stock)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (food_id, today, start_time, end_time, stock))
-
+        else:  # action == 'set'
+            # keep your manual set logic here
             conn.commit()
             return redirect('/admin/todays-menu')
 
+    # ---------- GET branch ----------
+    # Fetch today's menu (with food names)
     cursor.execute("""
-        SELECT dm.*, fi.name, fi.category
+        SELECT dm.*, fi.name, fi.category 
         FROM daily_menu dm
         JOIN food_items fi ON dm.food_id = fi.id
         WHERE DATE(dm.available_date) = %s
     """, (today,))
     data = cursor.fetchall()
 
-    current_menu_food_ids = {item['food_id'] for item in data}
+    # If no menu → run auto-set → fetch again
+    if not data:
+        auto_set_menu_for_date(today)   # this opens/closes its own conn
+        conn, cursor = get_db_connection()
+        cursor.execute("""
+            SELECT dm.*, fi.name, fi.category 
+            FROM daily_menu dm
+            JOIN food_items fi ON dm.food_id = fi.id
+            WHERE DATE(dm.available_date) = %s
+        """, (today,))
+        data = cursor.fetchall()
 
-    cursor.execute("SELECT * FROM food_items WHERE available = 1")
-    all_foods = cursor.fetchall()
-
-    foods_not_on_menu = [food for food in all_foods if food['id'] not in current_menu_food_ids]
-
+    # ✅ Build today_menu grouped by category
     today_menu = {}
     breakfast_times = {'start': None, 'end': None}
     lunch_times = {'start': None, 'end': None}
@@ -780,54 +904,50 @@ def admin_todays_menu():
         if category not in today_menu:
             today_menu[category] = []
         today_menu[category].append(item)
-        
+
         if category == 'breakfast' and breakfast_times['start'] is None:
-            if isinstance(item['start_time'], timedelta):
-                total_seconds = int(item['start_time'].total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                breakfast_times['start'] = time(hours, minutes, seconds)
-            else:
-                breakfast_times['start'] = item['start_time']
-            if isinstance(item['end_time'], timedelta):
-                total_seconds = int(item['end_time'].total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                breakfast_times['end'] = time(hours, minutes, seconds)
-            else:
-                breakfast_times['end'] = item['end_time']
-
+            breakfast_times['start'] = to_time(item['start_time'])
+            breakfast_times['end']   = to_time(item['end_time'])
         elif category == 'lunch' and lunch_times['start'] is None:
-            if isinstance(item['start_time'], timedelta):
-                total_seconds = int(item['start_time'].total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                lunch_times['start'] = time(hours, minutes, seconds)
-            else:
-                lunch_times['start'] = item['start_time']
-            if isinstance(item['end_time'], timedelta):
-                total_seconds = int(item['end_time'].total_seconds())
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                lunch_times['end'] = time(hours, minutes, seconds)
-            else:
-                lunch_times['end'] = item['end_time']
+            lunch_times['start'] = to_time(item['start_time'])
+            lunch_times['end']   = to_time(item['end_time'])
 
+    # Foods not yet on menu
+    current_menu_food_ids = {item['food_id'] for item in data}
+    cursor.execute("SELECT * FROM food_items WHERE available = 1")
+    all_foods = cursor.fetchall()
+    foods_not_on_menu = [f for f in all_foods if f['id'] not in current_menu_food_ids]
+
+    # Default times
     default_breakfast_start = "08:00"
-    default_breakfast_end = "11:00"
-    default_lunch_start = "12:00"
-    default_lunch_end = "15:00"
+    default_breakfast_end   = "23:00"
+    default_lunch_start     = "12:00"
+    default_lunch_end       = "23:00"
 
-    return render_template('todays_menu.html', 
-                            today_menu=today_menu, 
-                            foods=all_foods, 
-                            foods_not_on_menu=foods_not_on_menu, 
-                            breakfast_times=breakfast_times, 
-                            lunch_times=lunch_times,         
-                            default_breakfast_start=default_breakfast_start, 
-                            default_breakfast_end=default_breakfast_end,
-                            default_lunch_start=default_lunch_start,
-                            default_lunch_end=default_lunch_end)
+    return render_template(
+        "todays_menu.html",
+        today_menu=today_menu,
+        foods=all_foods,
+        foods_not_on_menu=foods_not_on_menu,
+        breakfast_times=breakfast_times,
+        lunch_times=lunch_times,
+        default_breakfast_start=default_breakfast_start,
+        default_breakfast_end=default_breakfast_end,
+        default_lunch_start=default_lunch_start,
+        default_lunch_end=default_lunch_end
+    )
+
+
+@app.route("/admin/run-auto-menu", methods=["POST"])
+@admin_required
+def run_auto_menu():
+    today = datetime.now().date()
+    try:
+        auto_set_menu_for_date(today)
+        return jsonify(success=True, message=f"Menu set for {today}")
+    except Exception as e:
+        return jsonify(success=False, message=str(e)), 500
+
 
 @app.route('/admin/deliver/<int:order_id>', methods=['POST'])
 @admin_required
@@ -838,7 +958,8 @@ def mark_delivered(order_id):
 
     # Admin can only deliver an order that has been confirmed (i.e., paid)
     cursor.execute("UPDATE orders SET status = 'delivered' WHERE id = %s AND status = 'confirmed'", (order_id,))
-    
+    conn.commit()   # ✅ FIX: commit the update
+
     # Notify user
     cursor.execute("SELECT user_id, token_number FROM orders WHERE id = %s", (order_id,))
     order_data = cursor.fetchone()
@@ -847,6 +968,7 @@ def mark_delivered(order_id):
         create_notification(order_data['user_id'], message, 'order_delivered', order_id)
 
     return redirect(url_for('admin_dashboard'))
+
 
 @app.route('/admin/logout',methods=['POST'])
 @admin_required
@@ -1059,26 +1181,27 @@ def live_stock():
 @app.route('/home')
 @login_required
 def home():
-    conn, cursor = get_db_connection()
     if not session.get('user_id'):
         return redirect(url_for('login'))
 
-
-    now = datetime.now()
-    today = datetime.now().date()
+    now = datetime.now(IST)   # use IST
+    today = now.date()
     current_time = now.time()
 
+    conn, cursor = get_db_connection()
     cursor.execute("""
-        SELECT fi.*, dm.stock
+        SELECT fi.*, dm.stock, dm.start_time, dm.end_time
         FROM food_items fi
         JOIN daily_menu dm ON fi.id = dm.food_id
         WHERE DATE(dm.available_date) = %s
           AND %s BETWEEN dm.start_time AND dm.end_time
           AND dm.stock > 0
+          AND fi.available=1
     """, (today, current_time))
-
     foods = cursor.fetchall()
+
     return render_template("index.html", foods=foods)
+
 
 @app.route('/food/<int:food_id>')
 @login_required
@@ -1126,7 +1249,7 @@ def cart():
 
 @app.route('/order/single', methods=['POST'])
 @login_required
-@limiter.limit("10 per minute")
+
 def order_single():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
@@ -1180,7 +1303,7 @@ def order_single():
 
 @app.route('/cart/order', methods=['POST'])
 @login_required
-@limiter.limit("5 per minute")  # ADD this line
+  # ADD this line
 def order_all_from_cart():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
@@ -1360,8 +1483,7 @@ def payment_webhook():
 
 
 @app.route('/cart/add', methods=['POST'])
-@login_required  # ADD this line  
-@limiter.limit("30 per minute")
+@login_required 
 def add_to_cart():
     conn, cursor = get_db_connection()
     if not session.get('user_id'):
@@ -1508,8 +1630,6 @@ def settings():
     conn, cursor = get_db_connection()
     cursor.execute("SELECT name, email, phone FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
-    cursor.close()
-    conn.close()
     
     return render_template('settings.html', user=user)
 
