@@ -21,6 +21,7 @@ from functools import wraps
 import logging
 from PIL import Image
 import re
+import traceback
 
 # Load environment variables
 load_dotenv()  # Add this line
@@ -863,14 +864,77 @@ def admin_todays_menu():
             return redirect('/admin/todays-menu')
 
         elif action == 'edit':
-            # keep your edit logic here
+    # Update breakfast & lunch times
+            breakfast_start = request.form.get("breakfast_start")
+            breakfast_end   = request.form.get("breakfast_end")
+            lunch_start     = request.form.get("lunch_start")
+            lunch_end       = request.form.get("lunch_end")
+
+            cursor.execute("""
+                UPDATE daily_menu 
+                SET start_time=%s, end_time=%s 
+                WHERE DATE(available_date)=%s AND category='breakfast'
+            """, (breakfast_start, breakfast_end, today))
+            cursor.execute("""
+                UPDATE daily_menu 
+                SET start_time=%s, end_time=%s 
+                WHERE DATE(available_date)=%s AND category='lunch'
+            """, (lunch_start, lunch_end, today))
+
+            # Update stock for current items
+            cursor.execute("SELECT food_id FROM daily_menu WHERE DATE(available_date)=%s", (today,))
+            current_food_ids = [row['food_id'] for row in cursor.fetchall()]
+            for food_id in current_food_ids:
+                stock_val = request.form.get(f"stock_{food_id}")
+                if stock_val is not None:
+                    cursor.execute(
+                        "UPDATE daily_menu SET stock=%s WHERE food_id=%s AND DATE(available_date)=%s",
+                        (stock_val, food_id, today)
+                    )
+
+            # Add newly selected items
+            new_food_ids = request.form.getlist("new_food_ids")
+            for food_id in new_food_ids:
+                stock_val = request.form.get(f"stock_new_{food_id}", 10)
+                cursor.execute("SELECT category FROM food_items WHERE id=%s", (food_id,))
+                category_row = cursor.fetchone()
+                category = category_row['category'] if category_row else "other"
+
+                start_time = breakfast_start if category == 'breakfast' else lunch_start
+                end_time   = breakfast_end if category == 'breakfast' else lunch_end
+
+                cursor.execute("""
+                    INSERT INTO daily_menu (food_id, available_date, start_time, end_time, stock, category)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (food_id, today, start_time, end_time, stock_val, category))
+
             conn.commit()
             return redirect('/admin/todays-menu')
 
         else:  # action == 'set'
-            # keep your manual set logic here
+            breakfast_start = request.form.get("breakfast_start")
+            breakfast_end   = request.form.get("breakfast_end")
+            lunch_start     = request.form.get("lunch_start")
+            lunch_end       = request.form.get("lunch_end")
+
+            food_ids = request.form.getlist("food_ids")
+            for food_id in food_ids:
+                stock_val = request.form.get(f"stock_{food_id}", 10)
+                cursor.execute("SELECT category FROM food_items WHERE id=%s", (food_id,))
+                category_row = cursor.fetchone()
+                category = category_row['category'] if category_row else "other"
+
+                start_time = breakfast_start if category == 'breakfast' else lunch_start
+                end_time   = breakfast_end if category == 'breakfast' else lunch_end
+
+                cursor.execute("""
+                    INSERT INTO daily_menu (food_id, available_date, start_time, end_time, stock, category)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (food_id, today, start_time, end_time, stock_val, category))
+
             conn.commit()
             return redirect('/admin/todays-menu')
+
 
     # ---------- GET branch ----------
     # Fetch today's menu (with food names)
@@ -1247,33 +1311,77 @@ def cart():
     cart_items = cursor.fetchall()
     return render_template('cart.html', cart_items=cart_items)
 
+RESERVATION_TIMEOUT_MINUTES = 10  # change as needed
+
+
+def release_expired_reservations(cursor, conn, minutes=RESERVATION_TIMEOUT_MINUTES):
+    """
+    Release any reserved rows older than `minutes`.
+    """
+    try:
+        cursor.execute("""
+            UPDATE daily_menu
+            SET availability = 'available', reserved_by = NULL, reserved_at = NULL
+            WHERE availability = 'reserved' AND reserved_at < DATE_SUB(NOW(), INTERVAL %s MINUTE)
+        """, (minutes,))
+        conn.commit()
+    except Exception as e:
+        # Log but don't crash the flow
+        print("Error releasing expired reservations:", e)
+        conn.rollback()
+
 @app.route('/order/single', methods=['POST'])
 @login_required
-
 def order_single():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
     data = request.get_json()
     user_id = session.get('user_id')
-    food_id = data['food_id']
-    qty = int(data['quantity'])
+    food_id = int(data['food_id'])
+    qty = int(data.get('quantity', 1))
     price = float(data['price'])
     total = qty * price
 
+    conn, cursor = None, None
+    reserved_by_me = False
     try:
         conn, cursor = get_db_connection()
+        # Release old expired reservations first
+        release_expired_reservations(cursor, conn)
 
-        # Stock validation
-        cursor.execute("SELECT stock FROM daily_menu WHERE food_id = %s AND DATE(available_date) = CURDATE()", (food_id,))
-        stock_data = cursor.fetchone()
-        if not stock_data or stock_data['stock'] < qty:
+        # Start transaction to reserve atomically for last-item case
+        conn.start_transaction()
+        cursor.execute("""
+            SELECT stock, availability
+            FROM daily_menu
+            WHERE food_id = %s AND DATE(available_date) = CURDATE()
+            FOR UPDATE
+        """, (food_id,))
+        row = cursor.fetchone()
+
+        if not row or row['stock'] < qty:
+            conn.rollback()
             return jsonify({'success': False, 'error': 'Item is out of stock.'}), 400
 
-        # Generate daily token
-        token = _generate_daily_token_number()
+        # Special handling only when this is the last stock
+        if row['stock'] == 1 and qty == 1:
+            if row['availability'] != 'available':
+                conn.rollback()
+                return jsonify({'success': False, 'error': 'Item is currently reserved by another user.'}), 400
 
-        # Store info in Razorpay notes
+            cursor.execute("""
+                UPDATE daily_menu
+                SET availability = 'reserved', reserved_by = %s, reserved_at = NOW()
+                WHERE food_id = %s AND DATE(available_date) = CURDATE()
+            """, (user_id, food_id))
+            reserved_by_me = True
+
+        # Commit reservation / or nothing if not last-item case
+        conn.commit()
+
+        # Generate token and Razorpay order
+        token = _generate_daily_token_number()
         notes = {
             "user_id": str(user_id),
             "food_id": str(food_id),
@@ -1282,12 +1390,24 @@ def order_single():
             "token_number": str(token)
         }
 
-        razorpay_order = razorpay_client.order.create({
-            "amount": int(total * 100),
-            "currency": "INR",
-            "receipt": f"single_{user_id}_{token}",
-            "notes": notes
-        })
+        try:
+            razorpay_order = razorpay_client.order.create({
+                "amount": int(total * 100),
+                "currency": "INR",
+                "receipt": f"single_{user_id}_{token}",
+                "notes": notes
+            })
+        except Exception as e:
+            # Razorpay order creation failed -> release reservation if we made one
+            if reserved_by_me:
+                cursor.execute("""
+                    UPDATE daily_menu
+                    SET availability = 'available', reserved_by = NULL, reserved_at = NULL
+                    WHERE food_id = %s AND DATE(available_date) = CURDATE() AND reserved_by = %s
+                """, (food_id, user_id))
+                conn.commit()
+            print("Error creating Razorpay order:", e)
+            return jsonify({'success': False, 'error': 'Could not create payment order.'}), 500
 
         return jsonify({
             'success': True,
@@ -1298,20 +1418,28 @@ def order_single():
         })
 
     except Exception as e:
-        print(f"Error creating single order: {e}")
+        if conn:
+            conn.rollback()
+        print("Error in order_single:", e)
+        traceback.print_exc()
         return jsonify({'success': False, 'error': 'Could not create order.'}), 500
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
 
 @app.route('/cart/order', methods=['POST'])
 @login_required
-  # ADD this line
 def order_all_from_cart():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
     user_id = session.get('user_id')
     conn, cursor = get_db_connection()
-    
+
     try:
+        # Fetch cart items with food info
         cursor.execute("""
             SELECT ci.food_id, ci.quantity, fi.price 
             FROM cart_items ci 
@@ -1319,11 +1447,11 @@ def order_all_from_cart():
             WHERE ci.user_id = %s
         """, (user_id,))
         items = cursor.fetchall()
-        
+
         if not items:
             return jsonify({'success': False, 'error': 'Cart is empty'}), 400
 
-        # SECURITY FIX: Validate stock for all items
+        # Validate stock for each item
         for item in items:
             cursor.execute("""
                 SELECT stock FROM daily_menu 
@@ -1341,11 +1469,11 @@ def order_all_from_cart():
             item['price'] = float(item['price'])
 
         total = sum(item['price'] * item['quantity'] for item in items)
-        
-        # SECURITY FIX: Validate total amount
-        if total <= 0 or total > 50000:  # Reasonable max limit
+
+        # Sanity check
+        if total <= 0 or total > 50000:
             return jsonify({'success': False, 'error': 'Invalid order total'}), 400
-            
+
         token = _generate_daily_token_number()
 
         notes = {
@@ -1354,6 +1482,7 @@ def order_all_from_cart():
             "items": json.dumps(items)
         }
 
+        # Create Razorpay order
         razorpay_order = razorpay_client.order.create({
             "amount": int(total * 100),
             "currency": "INR",
@@ -1372,112 +1501,246 @@ def order_all_from_cart():
     except Exception as e:
         print(f"Error creating cart order: {e}")
         return jsonify({'success': False, 'error': 'Could not create cart order.'}), 500
-    
+    finally:
+        if conn and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+
 @app.route('/payment/webhook', methods=['POST'])
 def payment_webhook():
+    import traceback
     print("⚡ Webhook hit!")
     webhook_body_bytes = request.data
-    webhook_body_str = webhook_body_bytes.decode('utf-8')
+    try:
+        webhook_body_str = webhook_body_bytes.decode('utf-8')
+    except Exception:
+        webhook_body_str = webhook_body_bytes  # fallback
+
     webhook_signature = request.headers.get('X-Razorpay-Signature')
-    
     if not webhook_signature:
         print("❌ Missing webhook signature")
         return 'Missing signature', 400
 
+    # Verify signature
     try:
         razorpay_client.utility.verify_webhook_signature(
             webhook_body_str,
             webhook_signature,
             RAZORPAY_WEBHOOK_SECRET
         )
-    except razorpay.errors.SignatureVerificationError:
-        print("❌ Signature verification failed!")
+    except Exception as e:
+        print("❌ Signature verification failed!", e)
         return 'Invalid signature', 400
 
-    payload = json.loads(webhook_body_str)
-    event = payload.get('event')
+    try:
+        payload = json.loads(webhook_body_str)
+    except Exception as e:
+        print("❌ Invalid JSON payload", e)
+        return 'Bad payload', 400
+
+    event = payload.get('event', '')
     print(f"🎯 Event received: {event}")
 
-    if event == 'payment.captured':
+    # Only handle payment.captured and payment.failed
+    if event not in ("payment.captured", "payment.failed"):
+        print("Ignoring event:", event)
+        return 'Ignored', 200
+
+    # Handle payment.failed -> release any reservations made by this user (if notes contain user_id)
+    if event == "payment.failed":
         try:
             payment_entity = payload['payload']['payment']['entity']
-            razorpay_order_id = payment_entity['order_id']
-            razorpay_payment_id = payment_entity['id']
-            amount_paid = payment_entity['amount']  # Amount in paisa
-            notes = payment_entity.get('notes', {})
-
-            # Validate required fields
-            if not all([razorpay_order_id, razorpay_payment_id, notes.get('user_id'), notes.get('token_number')]):
-                print("❌ Missing required fields in webhook")
-                return 'Invalid payload', 400
-
-            user_id = int(notes['user_id'])
-            token_number = int(notes['token_number'])
-
-            if 'items' in notes:
-                items = json.loads(notes['items'])
+            notes = payment_entity.get('notes', {}) or {}
+            user_id_note = notes.get('user_id')
+            if user_id_note:
+                conn, cursor = get_db_connection()
+                try:
+                    cursor.execute("""
+                        UPDATE daily_menu
+                        SET availability = 'available', reserved_by = NULL, reserved_at = NULL
+                        WHERE reserved_by = %s AND availability = 'reserved'
+                    """, (int(user_id_note),))
+                    conn.commit()
+                    print(f"Released reservations for user {user_id_note}")
+                except Exception as err:
+                    print("Error releasing reservations on payment.failed:", err)
+                    conn.rollback()
+                finally:
+                    if conn and conn.is_connected():
+                        cursor.close()
+                        conn.close()
             else:
+                print("No user_id in notes; nothing to release.")
+        except Exception as e:
+            print("Error processing payment.failed webhook:", e)
+            traceback.print_exc()
+        return 'OK', 200
+
+    # From here: event == "payment.captured"
+    try:
+        payment_entity = payload['payload']['payment']['entity']
+        razorpay_order_id = payment_entity.get('order_id')
+        razorpay_payment_id = payment_entity.get('id')
+        amount_paid = payment_entity.get('amount')  # paisa (int)
+        notes = payment_entity.get('notes', {}) or {}
+
+        # Validate presence of critical fields
+        if not (razorpay_order_id and razorpay_payment_id and notes.get('user_id') and notes.get('token_number')):
+            print("❌ Missing required fields in webhook notes/order info")
+            return 'Invalid payload', 400
+
+        user_id = int(notes['user_id'])
+        token_number = int(notes['token_number'])
+
+        # Build items list (cart or single)
+        if 'items' in notes:
+            try:
+                items = json.loads(notes['items'])
+            except Exception:
+                print("❌ Invalid items JSON in notes")
+                return 'Invalid payload', 400
+        else:
+            # single order expected fields: food_id, quantity, price
+            try:
                 items = [{
                     'food_id': int(notes['food_id']),
                     'quantity': int(notes['quantity']),
                     'price': float(notes['price'])
                 }]
+            except Exception as e:
+                print("❌ Missing single-order fields in notes:", e)
+                return 'Invalid payload', 400
 
-            # Verify payment amount matches order total
-            expected_total = sum(item['quantity'] * item['price'] for item in items)
-            if abs(amount_paid - (expected_total * 100)) > 1:
-                print(f"❌ Payment amount mismatch: expected {expected_total*100}, got {amount_paid}")
-                return 'Amount mismatch', 400
+        # Validate amount matches expected total
+        expected_total = 0.0
+        for it in items:
+            expected_total += int(it['quantity']) * float(it['price'])
 
-            conn, cursor = get_db_connection()
+        if abs(amount_paid - (expected_total * 100)) > 1:
+            print(f"❌ Payment amount mismatch: expected {expected_total*100}, got {amount_paid}")
+            return 'Amount mismatch', 400
 
-            # CRITICAL: Check for duplicate processing
+        # DB work
+        conn, cursor = get_db_connection()
+        # NOTE: do not call conn.start_transaction() — connector handles transactions
+        try:
+            # Idempotency check: payment already processed?
             cursor.execute("SELECT id FROM orders WHERE razorpay_payment_id = %s", (razorpay_payment_id,))
             if cursor.fetchone():
-                print(f"⚠️ Duplicate webhook for payment {razorpay_payment_id}")
+                print(f"⚠️ Duplicate webhook: payment {razorpay_payment_id} already processed")
                 return 'Already processed', 200
 
+            # Insert order row
             cursor.execute("""
                 INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, razorpay_order_id, razorpay_payment_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (user_id, expected_total, token_number, 'razorpay', 'paid', 'confirmed', razorpay_order_id, razorpay_payment_id))
             order_id = cursor.lastrowid
 
-            # Save each item and update stock
+            # For each item: lock row, validate, update stock/availability, insert order_items
             for item in items:
+                fid = int(item['food_id'])
+                qty = int(item['quantity'])
+                price = float(item['price'])
+
+                # Lock the row for update to prevent concurrent modifications
+                cursor.execute("""
+                    SELECT stock, availability, reserved_by
+                    FROM daily_menu
+                    WHERE food_id = %s AND DATE(available_date) = CURDATE()
+                    FOR UPDATE
+                """, (fid,))
+                dm = cursor.fetchone()
+                if not dm:
+                    # cannot fulfill -> rollback + refund
+                    conn.rollback()
+                    print(f"❌ No daily_menu row for food_id {fid}")
+                    try:
+                        razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
+                        print("Attempted refund due to missing daily_menu row")
+                    except Exception as ref_err:
+                        print("Refund attempt failed:", ref_err)
+                    return 'Fulfillment failed', 400
+
+                if dm['stock'] < qty:
+                    conn.rollback()
+                    print(f"❌ Insufficient stock for food {fid}. needed {qty}, have {dm['stock']}")
+                    try:
+                        razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
+                        print("Attempted refund due to insufficient stock")
+                    except Exception as ref_err:
+                        print("Refund attempt failed:", ref_err)
+                    return 'Fulfillment failed', 400
+
+                new_stock = dm['stock'] - qty
+                new_availability = 'not_available' if new_stock <= 0 else 'available'
+
+                cursor.execute("""
+                    UPDATE daily_menu
+                    SET stock = %s,
+                        availability = %s,
+                        reserved_by = NULL,
+                        reserved_at = NULL
+                    WHERE food_id = %s AND DATE(available_date) = CURDATE()
+                """, (new_stock, new_availability, fid))
+
                 cursor.execute("""
                     INSERT INTO order_items (order_id, food_id, quantity, price)
                     VALUES (%s, %s, %s, %s)
-                """, (order_id, item['food_id'], item['quantity'], item['price']))
+                """, (order_id, fid, qty, price))
 
-                cursor.execute("""
-                    UPDATE daily_menu SET stock = GREATEST(stock - %s, 0)
-                    WHERE food_id = %s AND DATE(available_date) = CURDATE()
-                """, (item['quantity'], item['food_id']))
-
-            # Clear cart if it was a cart order
+            # If it was a cart order -> clear cart
             if 'items' in notes:
-                cursor.execute("DELETE FROM cart_items WHERE user_id = %s", (user_id,))
+                try:
+                    cursor.execute("DELETE FROM cart_items WHERE user_id = %s", (user_id,))
+                except Exception as e:
+                    print("Warning: Failed to clear cart_items:", e)
 
+            # Commit everything
             conn.commit()
 
-            create_notification(
-               user_id=user_id,
-               message=f"Payment successful! Your order #{token_number} is confirmed.",
-               notif_type='payment_successful',
-               related_id=order_id
-            )
+            # Create notification (non-blocking)
+            try:
+                create_notification(
+                    user_id=user_id,
+                    message=f"Payment successful! Your order #{token_number} is confirmed.",
+                    notif_type='payment_successful',
+                    related_id=order_id
+                )
+            except Exception as e:
+                print("Warning: create_notification failed:", e)
 
             print(f"✅ Order #{order_id} saved successfully after payment")
 
-        except Exception as e:
-            if conn:
+        except Exception as db_err:
+            # Ensure rollback and attempt refund if necessary
+            try:
                 conn.rollback()
-            print(f"❌ Database transaction rolled back due to: {e}")
-        finally:
+            except Exception:
+                pass
+            print("❌ Database transaction rolled back due to:", db_err)
+            traceback.print_exc()
+            # Attempt refund as a fallback (best-effort)
+            try:
+                razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
+                print("Attempted refund after DB failure")
+            except Exception as ref_err:
+                print("Refund attempt failed after DB failure:", ref_err)
+            return 'Internal error', 500
+
+    except Exception as e:
+        print("❌ Error processing webhook:", e)
+        traceback.print_exc()
+        return 'Server error', 500
+    finally:
+        try:
             if conn and conn.is_connected():
                 cursor.close()
                 conn.close()
+        except Exception:
+            pass
 
     return 'OK', 200
 

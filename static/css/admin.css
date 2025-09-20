@@ -997,3 +997,25 @@ button.deliver-btn:hover {
     flex: 1 1 48%;
   }
 }
+
+#runAutoMenuBtn {
+  background: linear-gradient(45deg, #4facfe, #00f2fe);
+  color: white;
+  font-weight: bold;
+  border: none;
+  padding: 12px 20px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#runAutoMenuBtn:hover {
+  background: linear-gradient(45deg, #43e97b, #38f9d7);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+}
+
+#runAutoMenuBtn:active {
+  transform: scale(0.95);
+}

@@ -1,3 +1,5 @@
+CREATE DATABASE  IF NOT EXISTS `campusbites` /*!40100 DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci */ /*!80016 DEFAULT ENCRYPTION='N' */;
+USE `campusbites`;
 -- MySQL dump 10.13  Distrib 8.0.42, for Win64 (x86_64)
 --
 -- Host: 127.0.0.1    Database: campusbites
@@ -55,7 +57,7 @@ CREATE TABLE `cart_items` (
   `quantity` int DEFAULT '1',
   `added_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=69 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=79 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -64,7 +66,7 @@ CREATE TABLE `cart_items` (
 
 LOCK TABLES `cart_items` WRITE;
 /*!40000 ALTER TABLE `cart_items` DISABLE KEYS */;
-INSERT INTO `cart_items` VALUES (62,6,13,1,'2025-08-03 16:17:59'),(63,6,6,2,'2025-08-03 16:18:58'),(64,6,3,1,'2025-08-03 16:19:44'),(65,1,4,4,'2025-08-03 16:23:58'),(66,7,14,1,'2025-08-04 09:01:39'),(67,7,5,1,'2025-08-04 09:04:49'),(68,6,5,3,'2025-08-04 09:35:14');
+INSERT INTO `cart_items` VALUES (62,6,13,1,'2025-08-03 16:17:59'),(63,6,6,2,'2025-08-03 16:18:58'),(64,6,3,1,'2025-08-03 16:19:44'),(65,1,4,4,'2025-08-03 16:23:58'),(66,7,14,1,'2025-08-04 09:01:39'),(67,7,5,1,'2025-08-04 09:04:49'),(68,6,5,3,'2025-08-04 09:35:14'),(69,12,3,1,'2025-08-18 13:20:41'),(70,12,6,1,'2025-08-18 13:20:57'),(71,14,6,1,'2025-08-31 06:10:52'),(72,14,7,1,'2025-08-31 06:10:59');
 /*!40000 ALTER TABLE `cart_items` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -83,10 +85,13 @@ CREATE TABLE `daily_menu` (
   `start_time` time NOT NULL,
   `end_time` time NOT NULL,
   `stock` int DEFAULT '0',
+  `availability` enum('available','reserved','not_available') DEFAULT 'available',
+  `reserved_by` int DEFAULT NULL,
+  `reserved_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `food_id` (`food_id`),
+  UNIQUE KEY `unique_food_date` (`food_id`,`available_date`),
   CONSTRAINT `daily_menu_ibfk_1` FOREIGN KEY (`food_id`) REFERENCES `food_items` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB AUTO_INCREMENT=162 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=389 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -95,7 +100,7 @@ CREATE TABLE `daily_menu` (
 
 LOCK TABLES `daily_menu` WRITE;
 /*!40000 ALTER TABLE `daily_menu` DISABLE KEYS */;
-INSERT INTO `daily_menu` VALUES (7,3,'2025-07-16','breakfast','11:27:00','23:56:00',40),(8,4,'2025-07-16','breakfast','11:27:00','23:56:00',40),(24,3,'2025-07-17','breakfast','21:46:00','23:56:00',55),(25,4,'2025-07-17','breakfast','21:46:00','23:56:00',55),(26,5,'2025-07-17','breakfast','21:45:00','23:55:00',54),(32,3,'2025-07-18','breakfast','14:09:00','20:09:00',21),(33,5,'2025-07-18','breakfast','15:48:00','21:48:00',39),(41,3,'2025-07-19','breakfast','09:40:00','00:46:00',10),(42,4,'2025-07-19','breakfast','09:40:00','00:46:00',25),(43,5,'2025-07-19','breakfast','09:41:00','00:41:00',40),(46,3,'2025-07-20','breakfast','08:00:00','23:05:00',43),(47,4,'2025-07-20','breakfast','08:00:00','23:05:00',58),(48,6,'2025-07-20','breakfast','08:00:00','23:05:00',27),(49,7,'2025-07-20','breakfast','08:00:00','23:05:00',49),(50,8,'2025-07-20','breakfast','08:00:00','23:05:00',49),(51,5,'2025-07-20','breakfast','12:00:00','21:10:00',57),(52,9,'2025-07-20','breakfast','08:00:00','23:05:00',10),(53,10,'2025-07-20','breakfast','08:00:00','23:05:00',10),(54,3,'2025-07-21','breakfast','08:00:00','17:00:00',90),(55,8,'2025-07-21','breakfast','08:00:00','17:00:00',10),(56,10,'2025-07-21','breakfast','08:00:00','17:00:00',10),(57,7,'2025-07-21','breakfast','08:00:00','17:00:00',11),(58,4,'2025-07-21','breakfast','08:00:00','17:00:00',900),(59,3,'2025-07-22','breakfast','08:00:00','23:00:00',48),(60,4,'2025-07-22','breakfast','08:00:00','23:00:00',50),(61,6,'2025-07-22','breakfast','08:00:00','23:00:00',50),(62,7,'2025-07-22','breakfast','08:00:00','23:00:00',50),(63,8,'2025-07-22','breakfast','08:00:00','23:00:00',50),(64,9,'2025-07-22','breakfast','08:00:00','23:00:00',50),(65,10,'2025-07-22','breakfast','08:00:00','23:00:00',50),(66,5,'2025-07-22','breakfast','10:05:00','22:00:00',50),(68,3,'2025-07-24','breakfast','08:00:00','21:00:00',3),(69,4,'2025-07-24','breakfast','08:00:00','21:00:00',7),(70,6,'2025-07-24','breakfast','08:00:00','21:00:00',8),(71,7,'2025-07-24','breakfast','08:00:00','21:00:00',7),(72,8,'2025-07-24','breakfast','08:00:00','21:00:00',10),(73,9,'2025-07-24','breakfast','08:00:00','21:00:00',9),(74,10,'2025-07-24','breakfast','08:00:00','21:00:00',8),(75,5,'2025-07-24','breakfast','08:00:00','21:00:00',7),(77,3,'2025-07-25','breakfast','08:00:00','11:00:00',10),(78,6,'2025-07-25','breakfast','08:00:00','11:00:00',10),(79,7,'2025-07-25','breakfast','08:00:00','11:00:00',10),(80,8,'2025-07-25','breakfast','08:00:00','11:00:00',10),(81,5,'2025-07-25','breakfast','12:00:00','15:00:00',10),(83,3,'2025-07-28','breakfast','08:00:00','23:00:00',9),(84,4,'2025-07-28','breakfast','08:00:00','23:00:00',8),(85,6,'2025-07-28','breakfast','08:00:00','23:00:00',10),(86,7,'2025-07-28','breakfast','08:00:00','23:00:00',10),(87,8,'2025-07-28','breakfast','08:00:00','23:00:00',10),(88,9,'2025-07-28','breakfast','08:00:00','23:00:00',10),(89,10,'2025-07-28','breakfast','08:00:00','23:00:00',10),(90,12,'2025-07-28','breakfast','08:00:00','23:00:00',9),(91,5,'2025-07-28','breakfast','09:00:00','23:30:00',10),(96,3,'2025-07-29','breakfast','08:00:00','17:00:00',9),(97,4,'2025-07-29','breakfast','08:00:00','17:00:00',10),(98,6,'2025-07-29','breakfast','08:00:00','17:00:00',10),(99,7,'2025-07-29','breakfast','08:00:00','17:00:00',10),(100,5,'2025-07-29','breakfast','12:00:00','18:00:00',10),(101,13,'2025-07-29','breakfast','12:00:00','18:00:00',10),(112,3,'2025-07-30','breakfast','08:00:00','21:00:00',9),(113,6,'2025-07-30','breakfast','08:00:00','21:00:00',10),(114,13,'2025-07-30','breakfast','12:00:00','20:00:00',9),(115,4,'2025-07-30','breakfast','08:00:00','21:00:00',9),(116,7,'2025-07-30','breakfast','08:00:00','21:00:00',10),(117,12,'2025-07-30','breakfast','08:00:00','21:00:00',10),(118,3,'2025-07-31','breakfast','08:00:00','19:00:00',5),(119,4,'2025-07-31','breakfast','08:00:00','19:00:00',9),(120,6,'2025-07-31','breakfast','08:00:00','19:00:00',9),(121,7,'2025-07-31','breakfast','08:00:00','19:00:00',9),(122,8,'2025-07-31','breakfast','08:00:00','19:00:00',10),(123,9,'2025-07-31','breakfast','08:00:00','19:00:00',9),(124,10,'2025-07-31','breakfast','08:00:00','19:00:00',10),(125,12,'2025-07-31','breakfast','08:00:00','19:00:00',10),(126,5,'2025-07-31','breakfast','12:00:00','19:00:00',10),(127,13,'2025-07-31','breakfast','12:00:00','19:00:00',9),(128,3,'2025-08-01','breakfast','08:00:00','16:33:00',10),(129,4,'2025-08-01','breakfast','08:00:00','16:33:00',10),(130,7,'2025-08-01','breakfast','08:00:00','16:33:00',10),(131,8,'2025-08-01','breakfast','08:00:00','16:33:00',10),(132,9,'2025-08-01','breakfast','08:00:00','16:33:00',10),(133,10,'2025-08-01','breakfast','08:00:00','16:33:00',10),(134,12,'2025-08-01','breakfast','08:00:00','16:33:00',10),(135,5,'2025-08-01','breakfast','12:00:00','18:30:00',10),(136,13,'2025-08-01','breakfast','12:00:00','18:30:00',10),(137,3,'2025-08-03','breakfast','08:00:00','23:00:00',0),(138,4,'2025-08-03','breakfast','08:00:00','23:00:00',10),(139,6,'2025-08-03','breakfast','08:00:00','23:00:00',8),(140,7,'2025-08-03','breakfast','08:00:00','23:00:00',9),(141,8,'2025-08-03','breakfast','08:00:00','23:00:00',10),(142,9,'2025-08-03','breakfast','08:00:00','23:00:00',10),(143,10,'2025-08-03','breakfast','08:00:00','23:00:00',10),(144,12,'2025-08-03','breakfast','08:00:00','23:00:00',10),(145,5,'2025-08-03','breakfast','12:00:00','23:00:00',10),(146,13,'2025-08-03','breakfast','12:00:00','23:00:00',8),(147,14,'2025-08-03','breakfast','12:00:00','23:00:00',10),(148,5,'2025-08-04','breakfast','12:00:00','21:00:00',9),(149,13,'2025-08-04','breakfast','12:00:00','21:00:00',10),(150,14,'2025-08-04','breakfast','12:00:00','21:00:00',8),(151,3,'2025-08-15','breakfast','08:00:00','23:00:00',7),(152,4,'2025-08-15','breakfast','08:00:00','23:00:00',9),(153,6,'2025-08-15','breakfast','08:00:00','23:00:00',10),(154,7,'2025-08-15','breakfast','08:00:00','23:00:00',9),(155,8,'2025-08-15','breakfast','08:00:00','23:00:00',9),(156,9,'2025-08-15','breakfast','08:00:00','23:00:00',10),(157,10,'2025-08-15','breakfast','08:00:00','23:00:00',10),(158,12,'2025-08-15','breakfast','08:00:00','23:00:00',10),(159,5,'2025-08-15','breakfast','12:00:00','23:00:00',10),(160,13,'2025-08-15','breakfast','12:00:00','23:00:00',10),(161,14,'2025-08-15','breakfast','12:00:00','23:00:00',10);
+INSERT INTO `daily_menu` VALUES (377,3,'2025-09-18','breakfast','08:00:00','23:00:00',24,'available',NULL,NULL),(378,4,'2025-09-18','lunch','05:07:00','23:00:00',25,'available',NULL,NULL),(379,6,'2025-09-18','breakfast','08:00:00','23:00:00',25,'available',NULL,NULL),(380,7,'2025-09-18','breakfast','08:00:00','23:00:00',24,'available',NULL,NULL),(381,8,'2025-09-18','breakfast','08:00:00','23:00:00',25,'available',NULL,NULL),(382,10,'2025-09-18','breakfast','08:00:00','23:00:00',25,'available',NULL,NULL),(383,12,'2025-09-18','breakfast','08:00:00','23:00:00',20,'available',NULL,NULL),(384,13,'2025-09-18','lunch','12:00:00','23:00:00',23,'available',NULL,NULL),(385,14,'2025-09-18','lunch','12:00:00','23:00:00',25,'available',NULL,NULL),(386,15,'2025-09-18','breakfast','08:00:00','23:00:00',25,'available',NULL,NULL),(387,16,'2025-09-18','breakfast','08:00:00','23:00:00',25,'available',NULL,NULL),(388,17,'2025-09-18','breakfast','06:00:00','22:58:00',7,'available',NULL,NULL);
 /*!40000 ALTER TABLE `daily_menu` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -116,8 +121,16 @@ CREATE TABLE `food_items` (
   `stock` int DEFAULT '0',
   `about` text,
   `category` enum('breakfast','lunch') DEFAULT 'breakfast',
+  `days` set('mon','tue','wed','thu','fri','sat','sun') NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
+  `default_start_time` time NOT NULL DEFAULT '09:00:00',
+  `default_end_time` time NOT NULL DEFAULT '16:00:00',
+  `default_stock` int NOT NULL DEFAULT '0',
+  `default_breakfast_start` time DEFAULT '08:00:00',
+  `default_breakfast_end` time DEFAULT '11:00:00',
+  `default_lunch_start` time DEFAULT '12:00:00',
+  `default_lunch_end` time DEFAULT '15:00:00',
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -126,7 +139,7 @@ CREATE TABLE `food_items` (
 
 LOCK TABLES `food_items` WRITE;
 /*!40000 ALTER TABLE `food_items` DISABLE KEYS */;
-INSERT INTO `food_items` VALUES (3,'Chicken Biriyani',75.00,'chicken_biriyani_1753029774.webp','lunch',1,0,'i am a junk food','breakfast'),(4,'Veg Meals',50.00,'veg_meals_1753029797.webp','lunch',1,0,'i am a vegan broo....','breakfast'),(5,'chappathii',12.00,'chappathii_1753029826.webp',NULL,1,10,'shbuybfyubwuy','lunch'),(6,'bababa pufs',28.00,'bababa_pufs_1753029844.webp',NULL,1,10,'Hello there i am pufs ','breakfast'),(7,'Dosa',12.00,'dosa_1753029859.webp',NULL,1,10,'Dosa dosa dosa','breakfast'),(8,'Idli sambar',59.00,'idli_sambar_1753701382.webp',NULL,1,10,'Vssjsnsbsb','breakfast'),(9,'pani puriii',35.00,'pani_puriii_1753029890.webp',NULL,1,10,'blah blah blha','breakfast'),(10,'porotta',12.00,'porotta_1753029901.webp',NULL,1,10,'ghhg','breakfast'),(12,'berger',70.00,'berger.webp',NULL,1,10,'yummy','breakfast'),(13,'kozhi tikka 65',500.00,'kozhi_tikka_65.webp',NULL,1,10,'i am yummyyyyy','lunch'),(14,'Kaytha chakka',20.00,'kaytha_chakka.webp',NULL,1,10,'Very very tasty','lunch');
+INSERT INTO `food_items` VALUES (3,'Chicken Biriyani',75.00,'chicken_biriyani_1753029774.webp','lunch',1,25,'i am a junk food','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,'08:00:00','23:00:00',NULL,'23:00:00'),(4,'Veg Meals',50.00,'veg_meals_1753029797.webp','lunch',1,25,'i am a vegan broo....','lunch','mon,tue,wed,thu,fri,sun','05:07:00','23:00:00',25,'08:00:00','23:00:00','05:07:00','23:00:00'),(5,'chappathii',12.00,'chappathii_1753029826.webp',NULL,1,10,'shbuybfyubwuy','lunch','sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00'),(6,'bababa pufs',28.00,'bababa_pufs_1753029844.webp',NULL,1,10,'Hello there i am pufs ...','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00'),(7,'Dosa',12.00,'dosa_1753029859.webp',NULL,1,10,'Dosa dosa dosa','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00'),(8,'Idli sambar',59.00,'idli_sambar_1753701382.webp',NULL,1,10,'Vssjsnsbsb','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00'),(10,'porotta',12.00,'porotta_1753029901.webp',NULL,1,10,'ghhg','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00'),(12,'berger',70.00,'berger.webp',NULL,1,10,'yummy','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',20,'08:00:00','23:00:00','08:00:00','23:00:00'),(13,'kozhi tikka 65',500.00,'kozhi_tikka_65.webp',NULL,1,25,'i am yummyyyyy','lunch','mon,tue,wed,thu,fri,sat,sun','12:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00'),(14,'Kaytha chakka',20.00,'kaytha_chakka.webp',NULL,1,25,'Very very tasty','lunch','mon,tue,wed,thu,fri,sat,sun','12:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00'),(15,'keethuuuuu',1.00,'keethuuuuu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00'),(16,'paruu',1.00,'paruu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00'),(17,'midhun',7.00,'midhun_1758195687.webp','breakfast',1,7,'helo there eat me.....','breakfast','mon,tue,wed,thu,fri,sat,sun','06:00:00','22:58:00',7,'06:00:00','22:58:00','12:00:00','15:00:00');
 /*!40000 ALTER TABLE `food_items` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -154,7 +167,7 @@ CREATE TABLE `order_history` (
 
 LOCK TABLES `order_history` WRITE;
 /*!40000 ALTER TABLE `order_history` DISABLE KEYS */;
-INSERT INTO `order_history` VALUES (235,8,'1',450.00,'delivered','2025-08-03 21:44:54'),(236,6,'2',500.00,'delivered','2025-08-03 21:48:18'),(237,6,'3',556.00,'delivered','2025-08-03 21:49:07'),(238,6,'4',75.00,'delivered','2025-08-03 21:49:52'),(239,7,'1',20.00,'delivered','2025-08-04 14:32:43'),(240,7,'2',32.00,'delivered','2025-08-04 14:36:14'),(241,10,'1',75.00,'delivered','2025-08-14 13:59:31'),(242,9,'1',75.00,'confirmed','2025-08-14 15:16:28'),(243,9,'2',75.00,'delivered','2025-08-14 17:48:43');
+INSERT INTO `order_history` VALUES (235,8,'1',450.00,'delivered','2025-08-03 21:44:54'),(236,6,'2',500.00,'delivered','2025-08-03 21:48:18'),(237,6,'3',556.00,'delivered','2025-08-03 21:49:07'),(238,6,'4',75.00,'delivered','2025-08-03 21:49:52'),(239,7,'1',20.00,'delivered','2025-08-04 14:32:43'),(240,7,'2',32.00,'delivered','2025-08-04 14:36:14'),(241,10,'1',75.00,'delivered','2025-08-14 13:59:31'),(242,9,'1',75.00,'confirmed','2025-08-14 15:16:28'),(243,9,'2',75.00,'delivered','2025-08-14 17:48:43'),(244,9,'2',12.00,'confirmed','2025-08-15 18:01:00'),(245,9,'3',50.00,'confirmed','2025-08-15 18:36:47'),(246,9,'4',59.00,'confirmed','2025-08-15 19:34:05'),(247,12,'5',28.00,'confirmed','2025-08-18 18:55:40'),(248,12,'6',103.00,'confirmed','2025-08-18 18:56:17'),(249,14,'7',50.00,'delivered','2025-08-31 11:42:17'),(250,14,'8',500.00,'delivered','2025-08-31 12:00:53'),(251,14,'9',50.00,'delivered','2025-08-31 12:59:38'),(252,14,'10',12.00,'delivered','2025-08-31 13:10:40'),(253,14,'11',59.00,'delivered','2025-08-31 13:16:35'),(254,16,'12',75.00,'delivered','2025-08-31 18:27:59'),(255,16,'13',1716.00,'delivered','2025-08-31 18:29:13');
 /*!40000 ALTER TABLE `order_history` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -172,7 +185,7 @@ CREATE TABLE `order_items` (
   `quantity` int DEFAULT NULL,
   `price` decimal(10,2) DEFAULT NULL,
   PRIMARY KEY (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=201 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=218 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -181,7 +194,7 @@ CREATE TABLE `order_items` (
 
 LOCK TABLES `order_items` WRITE;
 /*!40000 ALTER TABLE `order_items` DISABLE KEYS */;
-INSERT INTO `order_items` VALUES (187,235,3,6,75.00),(188,236,13,1,500.00),(189,237,13,1,500.00),(190,237,6,2,28.00),(191,238,3,1,75.00),(192,239,14,1,20.00),(193,240,14,1,20.00),(194,240,5,1,12.00),(195,241,3,1,75.00),(196,242,3,1,75.00),(197,243,3,1,75.00),(198,244,7,1,12.00),(199,245,4,1,50.00),(200,246,8,1,59.00);
+INSERT INTO `order_items` VALUES (187,235,3,6,75.00),(188,236,13,1,500.00),(189,237,13,1,500.00),(190,237,6,2,28.00),(191,238,3,1,75.00),(192,239,14,1,20.00),(193,240,14,1,20.00),(194,240,5,1,12.00),(195,241,3,1,75.00),(196,242,3,1,75.00),(197,243,3,1,75.00),(198,244,7,1,12.00),(199,245,4,1,50.00),(200,246,8,1,59.00),(201,247,6,1,28.00),(202,248,3,1,75.00),(203,248,6,1,28.00),(204,249,4,1,50.00),(205,250,4,10,50.00),(206,251,4,1,50.00),(207,252,7,1,12.00),(208,253,8,1,59.00),(209,254,3,1,75.00),(210,255,8,19,59.00),(211,255,9,15,35.00),(212,255,12,1,70.00),(213,256,6,1,28.00),(214,257,3,1,75.00),(215,258,13,1,500.00),(216,259,7,1,12.00),(217,259,13,1,500.00);
 /*!40000 ALTER TABLE `order_items` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -208,7 +221,7 @@ CREATE TABLE `orders` (
   UNIQUE KEY `token_number` (`token_number`),
   KEY `idx_token` (`token_number`),
   KEY `idx_created_at` (`created_at`)
-) ENGINE=InnoDB AUTO_INCREMENT=247 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=260 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -217,7 +230,7 @@ CREATE TABLE `orders` (
 
 LOCK TABLES `orders` WRITE;
 /*!40000 ALTER TABLE `orders` DISABLE KEYS */;
-INSERT INTO `orders` VALUES (244,9,12.00,'confirmed','2025-08-15 18:01:00',2,'paid','order_R5bwUf08upaCuc','pay_R5bwfzIURuIYVE',NULL,'razorpay'),(245,9,50.00,'confirmed','2025-08-15 18:36:47',3,'paid','order_R5cYGLzuAVxNHr','pay_R5cYT9pWiuiCL3',NULL,'razorpay'),(246,9,59.00,'confirmed','2025-08-15 19:34:05',4,'paid','order_R5dWocCpL2kxUO','pay_R5dX0Vg9fF7kDW',NULL,'razorpay');
+INSERT INTO `orders` VALUES (256,16,28.00,'confirmed','2025-09-18 17:05:43',1,'paid','order_RJ3A18ne82iAP0','pay_RJ3AJohi7CXPut',NULL,'razorpay'),(257,16,75.00,'confirmed','2025-09-18 18:23:04',2,'paid','order_RJ4TmqlyxJuTFU','pay_RJ4U1fgQwQ3YpT',NULL,'razorpay'),(258,16,500.00,'confirmed','2025-09-18 18:24:12',3,'paid','order_RJ4V40au8U7Dbq','pay_RJ4VDLRqQNjzJe',NULL,'razorpay'),(259,16,512.00,'confirmed','2025-09-18 18:30:03',4,'paid','order_RJ4bBd4OCTM3KO','pay_RJ4bOsKov9r5HI',NULL,'razorpay');
 /*!40000 ALTER TABLE `orders` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -238,7 +251,7 @@ CREATE TABLE `uncollected_tokens` (
   UNIQUE KEY `token_number` (`token_number`,`order_date`),
   UNIQUE KEY `idx_token_number_uncollected` (`token_number`),
   KEY `order_id` (`order_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=345 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=350 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -247,7 +260,6 @@ CREATE TABLE `uncollected_tokens` (
 
 LOCK TABLES `uncollected_tokens` WRITE;
 /*!40000 ALTER TABLE `uncollected_tokens` DISABLE KEYS */;
-INSERT INTO `uncollected_tokens` VALUES (344,1,242,'2025-08-14 15:16:28','Not Collected/Paid');
 /*!40000 ALTER TABLE `uncollected_tokens` ENABLE KEYS */;
 UNLOCK TABLES;
 
@@ -267,7 +279,7 @@ CREATE TABLE `users` (
   `role` enum('student','staff') DEFAULT 'student',
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=18 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -276,7 +288,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'Joel Mathew',NULL,NULL,NULL,'student'),(2,'Maya Joseph',NULL,NULL,NULL,'student'),(3,'joel k',NULL,NULL,NULL,'staff'),(6,'keerthana v',NULL,NULL,NULL,NULL),(7,'midhun s',NULL,NULL,NULL,NULL),(8,'keerthana s',NULL,NULL,NULL,NULL),(9,'midhun','midhunsiby5@gmail.com','8590488423',NULL,'student'),(10,'MIDHUN SIBY ','midhunsiby3028@gmail.com','8590488423',NULL,'student');
+INSERT INTO `users` VALUES (16,'MIDHUN SIBY ','midhunsiby5@gmail.com','8590488423',NULL,'student'),(17,'MIDHUN SIBY ','midhunsiby3028@gmail.com','8590488423',NULL,'student');
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -289,4 +301,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2025-08-16 17:47:57
+-- Dump completed on 2025-09-20 11:37:13
