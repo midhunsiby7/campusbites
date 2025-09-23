@@ -88,9 +88,9 @@ def daily_task():
     def run_if_midnight_ist():
         now_ist = datetime.now(ist)
         hhmm = now_ist.strftime("%H:%M")
-        if now_ist.hour == 13 and now_ist.minute == 4:
+        if now_ist.hour == 15 and now_ist.minute == 12:
             _daily_cleanup_and_reset_at_startup()
-        if now_ist.hour == 17 and now_ist.minute == 4:
+        if now_ist.hour == 15 and now_ist.minute == 12:
             last_run = get_last_autoset_date()
             if last_run != str(now_ist.date()):
                 try:
@@ -946,17 +946,7 @@ def admin_todays_menu():
     """, (today,))
     data = cursor.fetchall()
 
-    # If no menu → run auto-set → fetch again
-    if not data:
-        auto_set_menu_for_date(today)   # this opens/closes its own conn
-        conn, cursor = get_db_connection()
-        cursor.execute("""
-            SELECT dm.*, fi.name, fi.category 
-            FROM daily_menu dm
-            JOIN food_items fi ON dm.food_id = fi.id
-            WHERE DATE(dm.available_date) = %s
-        """, (today,))
-        data = cursor.fetchall()
+
 
     # ✅ Build today_menu grouped by category
     today_menu = {}
