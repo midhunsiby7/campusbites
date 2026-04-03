@@ -6,6 +6,8 @@ import io
 import base64
 from datetime import datetime, date, timedelta, time
 import os
+import secrets
+import sys
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
@@ -19,38 +21,48 @@ from firebase_admin import credentials, auth
 from dotenv import load_dotenv
 from functools import wraps
 import logging
-from PIL import Image
-import re
 import traceback
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 # Load environment variables
-load_dotenv()  # Add this line
+load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+_IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
+
 # At the top
 app = Flask(__name__)
 
+_secret = os.getenv("FLASK_SECRET_KEY")
+if _IS_PRODUCTION:
+    if not _secret or len(_secret) < 16:
+        logger.critical("FLASK_SECRET_KEY must be set to a long random value in production.")
+        sys.exit(1)
+    app.secret_key = _secret
+else:
+    app.secret_key = _secret or secrets.token_hex(32)
+    if not _secret:
+        logger.warning("FLASK_SECRET_KEY not set; using an ephemeral session key (dev only).")
 
-# Update all your configuration to use environment variables:
-app.secret_key = os.getenv("FLASK_SECRET_KEY")
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax", 
-    SESSION_COOKIE_SECURE=os.getenv("FLASK_ENV") == "production",  # Only secure in production
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=_IS_PRODUCTION,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
     MAX_CONTENT_LENGTH=5 * 1024 * 1024,  # 5MB max file size
 )
 
-# Database configuration
+_db_port_raw = os.getenv("DB_PORT", "3306")
 DB_CONFIG = {
     'host': os.getenv("DB_HOST"),
     'user': os.getenv("DB_USER"),
     'password': os.getenv("DB_PASSWORD"),
     'database': os.getenv("DB_NAME"),
-    'port': os.getenv("DB_PORT"),
-    'ssl_disabled': True,
+    'port': int(_db_port_raw) if _db_port_raw else 3306,
+    'ssl_disabled': os.getenv("DB_SSL_DISABLED", "false").lower() in ("1", "true", "yes"),
     'autocommit': False
 }
 
@@ -59,11 +71,82 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 
-# Initialize Razorpay client
 razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
-cred = credentials.Certificate("myserviceAccountKey.json")  # Download from Firebase Console > Project Settings > Service Accounts
-firebase_admin.initialize_app(cred)
+FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "myserviceAccountKey.json")
+FIREBASE_READY = False
+if os.path.isfile(FIREBASE_CREDENTIALS_PATH):
+    try:
+        _fb_cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+        firebase_admin.initialize_app(_fb_cred)
+        FIREBASE_READY = True
+    except Exception as e:
+        logger.exception("Firebase Admin SDK failed to initialize: %s", e)
+else:
+    logger.warning(
+        "Firebase credentials not found at FIREBASE_CREDENTIALS_PATH=%s — user login will fail until configured.",
+        FIREBASE_CREDENTIALS_PATH,
+    )
+
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri=os.getenv("RATELIMIT_STORAGE_URI", "memory://"),
+    default_limits=[],
+    headers_enabled=True,
+)
+
+
+def _csrf_path_exempt():
+    p = request.path.rstrip("/") or "/"
+    return p == "/payment/webhook"
+
+
+def _csrf_token_valid():
+    if _csrf_path_exempt():
+        return True
+    token = session.get("csrf_token")
+    if not token:
+        return False
+    sent = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token")
+    if sent:
+        try:
+            return secrets.compare_digest(sent, token)
+        except Exception:
+            return False
+    body = request.get_json(silent=True)
+    if isinstance(body, dict) and body.get("csrf_token"):
+        try:
+            return secrets.compare_digest(str(body["csrf_token"]), token)
+        except Exception:
+            return False
+    return False
+
+
+@app.context_processor
+def inject_csrf():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return {"csrf_token": session["csrf_token"]}
+
+
+def apply_authoritative_prices_to_items(items):
+    """Overwrite line prices from food_items so webhooks cannot trust client-tampered notes."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    try:
+        cur = conn.cursor(dictionary=True)
+        for it in items:
+            cur.execute("SELECT price FROM food_items WHERE id = %s", (int(it["food_id"]),))
+            row = cur.fetchone()
+            if not row:
+                raise ValueError(f"Unknown food_id {it['food_id']}")
+            it["price"] = float(row["price"])
+        return items
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 # Auto menu set time (HH:MM, 24h, IST). Change via .env if you want.
 MENU_AUTOSET_TIME = os.getenv("MENU_AUTOSET_TIME", "05:00")  # 5:00 AM IST default
@@ -126,10 +209,6 @@ def to_time(val):
 UPLOAD_FOLDER = 'static/uploads'
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
 
-# Initialize Razorpay client
-razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
-
- 
 
 def get_db_connection():
     if 'db_conn' not in g:
@@ -211,12 +290,12 @@ def auto_set_menu_for_date(target_date: date):
 
 def get_or_create_user(email, name=None, provider=None):
     """Returns (user_id, need_profile, db_name, db_phone, db_role). Creates user if not found."""
-    conn, cursor = get_db_connection()
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor(dictionary=True, buffered=True)
     try:
         cursor.execute("SELECT id, name, phone, role FROM users WHERE email=%s LIMIT 1", (email,))
         row = cursor.fetchone()
         if not row:
-            # create minimal user; you can store provider if you kept that column
             cursor.execute("""
                 INSERT INTO users (email, name, phone, role)
                 VALUES (%s, %s, %s, %s)
@@ -225,21 +304,37 @@ def get_or_create_user(email, name=None, provider=None):
             user_id = cursor.lastrowid
             need_profile = True
             return user_id, need_profile, (name or ""), None, 'student'
-        else:
-            user_id = row['id']
-            db_name = row['name']
-            db_phone = row['phone']
-            db_role = row.get('role', 'student') if isinstance(row, dict) else row['role']
-            need_profile = (not db_name) or (not db_phone)
-            return user_id, need_profile, db_name, db_phone, db_role
+        user_id = row['id']
+        db_name = row['name']
+        db_phone = row['phone']
+        db_role = row.get('role', 'student') if isinstance(row, dict) else row['role']
+        need_profile = (not db_name) or (not db_phone)
+        return user_id, need_profile, db_name, db_phone, db_role
     finally:
-        cursor.close()
-        conn.close()
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @app.before_request
 def before_request():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    if request.method == "POST" and not _csrf_token_valid():
+        return jsonify({"error": "CSRF validation failed. Refresh the page and try again."}), 403
     get_db_connection()
+
+
+@app.get("/api/csrf-token")
+def api_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+    return jsonify({"csrf_token": session["csrf_token"]})
 
 @app.teardown_request
 def teardown_request(exception):
@@ -341,50 +436,61 @@ def _daily_cleanup_and_reset_at_startup():
         startup_db_conn = mysql.connector.connect(**DB_CONFIG)
         startup_cursor = startup_db_conn.cursor(dictionary=True, buffered=True)
 
-        yesterday = date.today() - timedelta(days=1)
+        yesterday = (datetime.now(IST) - timedelta(days=1)).date()
 
-        # Flag file to prevent repeated cleanup per day
         cleanup_flag_file = os.path.join(app.root_path, '.last_cleanup_date')
         last_cleanup_date_str = None
         if os.path.exists(cleanup_flag_file):
             with open(cleanup_flag_file, 'r') as f:
                 last_cleanup_date_str = f.read().strip()
 
-        if last_cleanup_date_str == str(date.today()):
-            print(f"[✔] Cleanup for {date.today()} already done.")
+        if last_cleanup_date_str == str(datetime.now(IST).date()):
+            print(f"[✔] Cleanup for {datetime.now(IST).date()} already done.")
             return
 
-        print(f"[⏳] Performing cleanup for {yesterday}...")
+        print(f"[⏳] Performing archival for orders on {yesterday} (IST)...")
 
-        # Get all orders from yesterday (no status filter)
-        startup_cursor.execute("""
+        startup_cursor.execute(
+            """
             SELECT * FROM orders
-        """)
+            WHERE DATE(created_at) = %s
+            """,
+            (yesterday,),
+        )
         old_orders = startup_cursor.fetchall()
 
         for order in old_orders:
             try:
-                # Insert into order_history
-                startup_cursor.execute("""
+                startup_cursor.execute(
+                    """
                     INSERT INTO order_history (id, user_id, token_number, total, status, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    order['id'], order['user_id'], order['token_number'],
-                    order['total'], order['status'], order['created_at']
-                ))
+                    """,
+                    (
+                        order['id'],
+                        order['user_id'],
+                        order['token_number'],
+                        order['total'],
+                        order['status'],
+                        order['created_at'],
+                    ),
+                )
 
-                # If status was still open, add to uncollected tokens
                 if order['status'] in ['pending', 'confirmed']:
-                    startup_cursor.execute("""
+                    startup_cursor.execute(
+                        """
                         INSERT IGNORE INTO uncollected_tokens (token_number, order_id, order_date, reason)
                         VALUES (%s, %s, %s, %s)
-                    """, (
-                        order['token_number'], order['id'], order['created_at'],
-                        'Not Collected/Paid'
-                    ))
+                        """,
+                        (
+                            order['token_number'],
+                            order['id'],
+                            order['created_at'],
+                            'Not Collected/Paid',
+                        ),
+                    )
 
-                # Delete from orders
-                startup_cursor.execute("DELETE FROM orders")
+                startup_cursor.execute("DELETE FROM orders WHERE id = %s", (order['id'],))
 
             except mysql.connector.Error as err:
                 print(f"⚠️ Error for order ID {order['id']}: {err}")
@@ -392,9 +498,9 @@ def _daily_cleanup_and_reset_at_startup():
         startup_db_conn.commit()
 
         with open(cleanup_flag_file, 'w') as f:
-            f.write(str(date.today()))
+            f.write(str(datetime.now(IST).date()))
 
-        print(f"[✅] Cleanup completed. Moved {len(old_orders)} orders to order_history.")
+        print(f"[✅] Cleanup completed. Archived {len(old_orders)} order(s) from {yesterday}.")
 
     except Exception as e:
         if startup_db_conn and startup_db_conn.is_connected():
@@ -430,7 +536,7 @@ def intro():
 
 # Admin Login Page
 @app.route('/admin/login', methods=['GET', 'POST'])
-  # ADD this line
+@limiter.limit("15 per minute")
 def admin_login():
     if session.get('admin_logged_in'):
         return redirect(url_for('admin_dashboard'))
@@ -489,8 +595,10 @@ def firebase_config():
 
 # Handle login data from frontend
 @app.route("/firebase-login", methods=["POST"])
-  # ADD this line
+@limiter.limit("30 per minute")
 def firebase_login():
+    if not FIREBASE_READY:
+        return jsonify({"error": "Authentication service is not configured."}), 503
     data = request.get_json()
     id_token = data.get("idToken")
     name = data.get("name", "")
@@ -1074,6 +1182,8 @@ def confirm_by_token():
     order = cursor.fetchone()
     if order:
         if order['status'] == 'pending':
+            if order.get('payment_status') != 'paid':
+                return jsonify({'success': False, 'error': 'Order is not paid; cannot confirm.'}), 400
             cursor.execute("UPDATE orders SET status = 'confirmed' WHERE id = %s", (order['id'],))
             conn.commit()
             cursor.execute("UPDATE order_history SET status = %s WHERE order_id = %s", ('confirmed', order['id']))
@@ -1127,14 +1237,18 @@ def confirm_order(order_id):
     if not session.get('admin_logged_in'):
         return redirect('/admin/login')
 
-    cursor.execute("SELECT user_id, token_number FROM orders WHERE id = %s AND status = 'pending'", (order_id,))
+    cursor.execute(
+        "SELECT user_id, token_number, payment_status FROM orders WHERE id = %s AND status = 'pending'",
+        (order_id,),
+    )
     order_data = cursor.fetchone()
 
     if not order_data:
         return "Order not found or is not in a confirmable state.", 404
 
-    # MODIFICATION: The entire block checking for the 10-minute delay has been removed.
-    
+    if order_data.get('payment_status') != 'paid':
+        return "Only paid orders can be confirmed.", 400
+
     cursor.execute("UPDATE orders SET status = 'confirmed' WHERE id = %s", (order_id,))
     
     # You can add your notification logic here if needed
@@ -1326,35 +1440,51 @@ def order_single():
     if not session.get('user_id'):
         return jsonify({'success': False, 'error': 'Unauthorized'}), 401
 
-    data = request.get_json()
+    data = request.get_json() or {}
     user_id = session.get('user_id')
-    food_id = int(data['food_id'])
-    qty = int(data.get('quantity', 1))
-    price = float(data['price'])
-    total = qty * price
+    try:
+        food_id = int(data['food_id'])
+        qty = int(data.get('quantity', 1))
+    except (KeyError, TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Invalid food or quantity.'}), 400
+    if qty < 1 or qty > 500:
+        return jsonify({'success': False, 'error': 'Invalid quantity.'}), 400
 
     conn, cursor = None, None
     reserved_by_me = False
     try:
         conn, cursor = get_db_connection()
-        # Release old expired reservations first
         release_expired_reservations(cursor, conn)
 
-        # Start transaction to reserve atomically for last-item case
         conn.start_transaction()
+        current_time = datetime.now().time()
+        today = date.today()
         cursor.execute("""
-            SELECT stock, availability
-            FROM daily_menu
-            WHERE food_id = %s AND DATE(available_date) = CURDATE()
+            SELECT dm.stock, dm.availability, dm.start_time, dm.end_time, fi.price
+            FROM daily_menu dm
+            JOIN food_items fi ON fi.id = dm.food_id
+            WHERE dm.food_id = %s AND DATE(dm.available_date) = %s
             FOR UPDATE
-        """, (food_id,))
+        """, (food_id, today))
         row = cursor.fetchone()
 
-        if not row or row['stock'] < qty:
+        if not row:
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'This item is not on today\'s menu.'}), 400
+
+        st = to_time(row['start_time'])
+        et = to_time(row['end_time'])
+        if not (st <= current_time <= et):
+            conn.rollback()
+            return jsonify({'success': False, 'error': 'This item is not available at the current time.'}), 400
+
+        price = float(row['price'])
+        total = qty * price
+
+        if row['stock'] < qty:
             conn.rollback()
             return jsonify({'success': False, 'error': 'Item is out of stock.'}), 400
 
-        # Special handling only when this is the last stock
         if row['stock'] == 1 and qty == 1:
             if row['availability'] != 'available':
                 conn.rollback()
@@ -1367,10 +1497,8 @@ def order_single():
             """, (user_id, food_id))
             reserved_by_me = True
 
-        # Commit reservation / or nothing if not last-item case
         conn.commit()
 
-        # Generate token and Razorpay order
         token = _generate_daily_token_number()
         notes = {
             "user_id": str(user_id),
@@ -1382,7 +1510,7 @@ def order_single():
 
         try:
             razorpay_order = razorpay_client.order.create({
-                "amount": int(total * 100),
+                "amount": int(round(total * 100)),
                 "currency": "INR",
                 "receipt": f"single_{user_id}_{token}",
                 "notes": notes
@@ -1499,6 +1627,7 @@ def order_all_from_cart():
 
 
 @app.route('/payment/webhook', methods=['POST'])
+@limiter.exempt
 def payment_webhook():
     import traceback
     print("⚡ Webhook hit!")
@@ -1569,6 +1698,8 @@ def payment_webhook():
         return 'OK', 200
 
     # From here: event == "payment.captured"
+    conn = None
+    cursor = None
     try:
         payment_entity = payload['payload']['payment']['entity']
         razorpay_order_id = payment_entity.get('order_id')
@@ -1592,7 +1723,7 @@ def payment_webhook():
                 print("❌ Invalid items JSON in notes")
                 return 'Invalid payload', 400
         else:
-            # single order expected fields: food_id, quantity, price
+            # single order expected fields: food_id, quantity, price (price re-verified from DB below)
             try:
                 items = [{
                     'food_id': int(notes['food_id']),
@@ -1603,10 +1734,28 @@ def payment_webhook():
                 print("❌ Missing single-order fields in notes:", e)
                 return 'Invalid payload', 400
 
-        # Validate amount matches expected total
+        try:
+            items = apply_authoritative_prices_to_items(items)
+        except Exception as e:
+            print("❌ Price verification failed:", e)
+            return 'Invalid items', 400
+
         expected_total = 0.0
         for it in items:
             expected_total += int(it['quantity']) * float(it['price'])
+
+        try:
+            rz_order = razorpay_client.order.fetch(razorpay_order_id)
+            order_amount_paise = int(rz_order.get('amount') or 0)
+            if order_amount_paise != int(amount_paid):
+                print("❌ Payment amount does not match Razorpay order record")
+                return 'Amount mismatch', 400
+            if abs(order_amount_paise - int(round(expected_total * 100))) > 1:
+                print(f"❌ Razorpay order amount {order_amount_paise} vs DB-computed {expected_total*100}")
+                return 'Amount mismatch', 400
+        except Exception as e:
+            print("❌ Could not verify Razorpay order:", e)
+            return 'Order verification failed', 400
 
         if abs(amount_paid - (expected_total * 100)) > 1:
             print(f"❌ Payment amount mismatch: expected {expected_total*100}, got {amount_paid}")
@@ -1802,10 +1951,17 @@ def update_cart():
     data = request.get_json()
     cart_item_id = data['cart_item_id']
     action = data['action']
+    uid = session.get('user_id')
     if action == 'increase':
-        cursor.execute("UPDATE cart_items SET quantity = quantity + 1 WHERE id = %s", (cart_item_id,))
+        cursor.execute(
+            "UPDATE cart_items SET quantity = quantity + 1 WHERE id = %s AND user_id = %s",
+            (cart_item_id, uid),
+        )
     else:
-        cursor.execute("UPDATE cart_items SET quantity = GREATEST(quantity - 1, 1) WHERE id = %s", (cart_item_id,))
+        cursor.execute(
+            "UPDATE cart_items SET quantity = GREATEST(quantity - 1, 1) WHERE id = %s AND user_id = %s",
+            (cart_item_id, uid),
+        )
     conn.commit()
     return '', 204
 
@@ -1820,7 +1976,7 @@ def remove_cart():
 
     data = request.get_json()
     cart_item_id = data['cart_item_id']
-    cursor.execute("DELETE FROM cart_items WHERE id = %s", (cart_item_id,))
+    cursor.execute("DELETE FROM cart_items WHERE id = %s AND user_id = %s", (cart_item_id, session.get('user_id')))
     conn.commit()
     return '', 204
 
@@ -1955,4 +2111,5 @@ def ratelimit_handler(e):
     return jsonify({'error': 'Too many requests. Please try again later.'}), 429
 
 if __name__ == '__main__':
-    app.run(host="0.0.0.0",debug=True, port=5055)
+    _debug = os.getenv("FLASK_DEBUG", "").lower() in ("1", "true", "yes") and not _IS_PRODUCTION
+    app.run(host="0.0.0.0", debug=_debug, port=int(os.getenv("PORT", "5055")))
