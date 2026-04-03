@@ -2,6 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>CampusBites Login</title>
   <style>
     body {
@@ -156,9 +157,10 @@ document.getElementById("emailRegister").addEventListener("click", async (event)
 // --- Send ID Token to Backend ---
 // --- Send ID Token to Backend ---
 async function sendIdTokenToBackend(idToken, name = null, phone = null) {
+  const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
   const res = await fetch("/firebase-login", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
     body: JSON.stringify({ idToken, name, phone }),
     credentials: "same-origin"
   });
@@ -166,12 +168,12 @@ async function sendIdTokenToBackend(idToken, name = null, phone = null) {
   const data = await res.json();
   if (res.ok) {
     if (data.need_profile) {
-      window.location.href = "/complete-profile";  // ✅ This will redirect to your page
+      window.location.href = "/complete-profile";
     } else {
       window.location.href = "/home";
     }
   } else {
-    showError("Backend Error: " + error.message);
+    showError("Backend Error: " + (data.error || res.statusText));
   }
 }
 </script>

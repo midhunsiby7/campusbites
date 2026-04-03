@@ -119,6 +119,7 @@
     {% if order.status == 'pending' %}
         {% if is_confirmable_now %}
             <form method="POST" action="{{ url_for('confirm_order', order_id=order.order_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="mark-btn confirm">Confirm Order</button>
             </form>
         {% else %}
@@ -126,6 +127,7 @@
         {% endif %}
     {% elif order.status == 'confirmed' %}
         <form method="POST" action="{{ url_for('mark_delivered', order_id=order.order_id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="mark-btn deliver">Mark as Delivered</button>
         </form>
     {% else %} {# delivered or collected #}

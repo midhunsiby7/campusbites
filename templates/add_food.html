@@ -22,6 +22,7 @@
   <div class="form-container">
     <h2>Add New Food</h2>
     <form action="/admin/add-food" method="POST" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="form-group">
         <label for="name">Food Name:</label>
         <input type="text" name="name" id="name" required>
