@@ -9,6 +9,7 @@ import os
 import secrets
 import sys
 from werkzeug.utils import secure_filename
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from PIL import Image
 import re
@@ -35,6 +36,7 @@ _IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
 
 # At the top
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 _secret = os.getenv("FLASK_SECRET_KEY")
 if _IS_PRODUCTION:
