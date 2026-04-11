@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Admin Settings - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260410c">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=20260410c">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
+</head>
+<body class="admin-body admin-settings-page">
+  <header class="admin-header">
+    <h1 class="admin-title">Admin Settings</h1>
+    <nav class="admin-nav">
+      <a href="{{ url_for('admin_dashboard') }}" class="admin-nav-btn">Dashboard</a>
+      <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
+      <form action="{{ url_for('admin_logout') }}" method="POST" class="logout-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="logout-btn">Logout</button>
+      </form>
+    </nav>
+  </header>
+
+  <main class="admin-main">
+    <div class="form-container">
+      <h2>Appearance</h2>
+      <div id="theme-toggle-root"></div>
+      <p>Signed in as <strong>{{ admin_username }}</strong></p>
+      <p>Use the switch above to toggle light or dark theme.</p>
+    </div>
+  </main>
+</body>
+</html>

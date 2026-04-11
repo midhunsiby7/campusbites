@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, jsonify, session, url_for, g
 import json
 import mysql.connector
+from mysql.connector import errors as mysql_errors
 import qrcode
 import io
 import base64
@@ -150,11 +151,13 @@ def apply_authoritative_prices_to_items(items):
         except Exception:
             pass
 
-# Auto menu set time (HH:MM, 24h, IST). Change via .env if you want.
-MENU_AUTOSET_TIME = os.getenv("MENU_AUTOSET_TIME", "05:00")  # 5:00 AM IST default
+# Auto menu set time (HH:MM, 24h, IST). Configurable via .env MENU_AUTOSET_TIME.
+MENU_AUTOSET_TIME = os.getenv("MENU_AUTOSET_TIME", "00:01")  # 00:01 AM IST default
+CLEANUP_TIME = os.getenv("CLEANUP_TIME", "00:00")  # 00:00 AM IST default
 IST = pytz.timezone("Asia/Kolkata")
 
 AUTOSET_FILE = ".lastautosetdate"
+CLEANUP_DONE_FILE = ".last_cleanup_date"
 
 def get_last_autoset_date():
     if os.path.exists(AUTOSET_FILE):
@@ -167,27 +170,62 @@ def set_last_autoset_date(d):
         f.write(str(d))
 
 
+def _parse_hhmm(s):
+    """Parse HH:MM string into (hour, minute) integers."""
+    try:
+        h, m = s.strip().split(":")
+        return int(h), int(m)
+    except Exception:
+        return 0, 0
+
+
 def daily_task():
     ist = pytz.timezone("Asia/Kolkata")
-    last_autoset_date = None  # keep outside the loop (module/global) so it persists
-    def run_if_midnight_ist():
+
+    def run_scheduled_tasks():
         now_ist = datetime.now(ist)
-        hhmm = now_ist.strftime("%H:%M")
-        if now_ist.hour == 15 and now_ist.minute == 12:
-            _daily_cleanup_and_reset_at_startup()
-        if now_ist.hour == 15 and now_ist.minute == 12:
+        today_str = str(now_ist.date())
+
+        now_time = now_ist.time()
+
+        # --- Cleanup task ---
+        c_hour, c_min = _parse_hhmm(CLEANUP_TIME)
+        c_time = time(c_hour, c_min)
+
+        if now_time >= c_time:
+            # Read cleanup flag file directly (not relying on in-memory state)
+            last_cleanup = ""
+            if os.path.exists(CLEANUP_DONE_FILE):
+                with open(CLEANUP_DONE_FILE, "r") as f:
+                    last_cleanup = f.read().strip()
+            if last_cleanup != today_str:
+                print(f"[CLEANUP] Triggering daily cleanup for {today_str}")
+                try:
+                    _daily_cleanup_and_reset_at_startup()
+                except Exception as e:
+                    print(f"[CLEANUP] Failed: {e}")
+
+        # --- Auto-menu task ---
+        m_hour, m_min = _parse_hhmm(MENU_AUTOSET_TIME)
+        m_time = time(m_hour, m_min)
+
+        if now_time >= m_time:
             last_run = get_last_autoset_date()
-            if last_run != str(now_ist.date()):
+            if last_run != today_str:
                 try:
                     auto_set_menu_for_date(now_ist.date())
-                    print(f"[AUTO-MENU] Set menu for {now_ist.date()} done..")
+                    print(f"[AUTO-MENU] Set menu for {now_ist.date()} done.")
                     set_last_autoset_date(now_ist.date())
                 except Exception as e:
                     print(f"[AUTO-MENU] Failed: {e}")
 
     while True:
-        run_if_midnight_ist()
+        try:
+            run_scheduled_tasks()
+        except Exception as e:
+            print(f"[DAILY-TASK] Unexpected error: {e}")
         time_module.sleep(60)  # check every minute
+
 # Start the daily task thread
 threading.Thread(target=daily_task, daemon=True).start()
 
@@ -331,6 +369,10 @@ def before_request():
         return jsonify({"error": "CSRF validation failed. Refresh the page and try again."}), 403
     get_db_connection()
 
+@app.context_processor
+def inject_csrf_token():
+    return dict(csrf_token=session.get('csrf_token', ''))
+
 
 @app.get("/api/csrf-token")
 def api_csrf_token():
@@ -412,23 +454,65 @@ def process_and_save_image(file, food_name):
     
 # --- TOKEN GENERATION AND CLEANUP LOGIC ---
 
-def _generate_daily_token_number():
-    conn, cursor = get_db_connection()
-    today = date.today()
+_CHECKOUT_TOKEN_HOLDS_TABLE_OK = False
+CHECKOUT_USER_LOCK_TIMEOUT = 15
+TOKEN_ALLOC_LOCK_TIMEOUT = 25
+_CHECKOUT_USER_LOCK_PREFIX = "cb_co_u"
+_TOKEN_ALLOC_LOCK_NAME = "cb_token_alloc"
 
-    # Fetch all used tokens from today's orders
-    cursor.execute("SELECT token_number FROM orders WHERE DATE(created_at) = %s", (today,))
-    used_tokens_today = {row['token_number'] for row in cursor.fetchall()}
 
-    # Fetch permanently blocked tokens from uncollected
+def _ensure_checkout_token_holds_table():
+    """Create checkout_token_holds if missing (reserves token_number until payment settles)."""
+    global _CHECKOUT_TOKEN_HOLDS_TABLE_OK
+    if _CHECKOUT_TOKEN_HOLDS_TABLE_OK:
+        return
+    conn = mysql.connector.connect(**DB_CONFIG)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS checkout_token_holds (
+              token_number INT NOT NULL PRIMARY KEY,
+              razorpay_order_id VARCHAR(255) NOT NULL,
+              user_id INT NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY uniq_rz_order (razorpay_order_id),
+              KEY idx_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            """
+        )
+        conn.commit()
+        _CHECKOUT_TOKEN_HOLDS_TABLE_OK = True
+    finally:
+        conn.close()
+
+
+def _mysql_named_lock_acquire(cursor, name: str, timeout_sec: int) -> bool:
+    cursor.execute("SELECT GET_LOCK(%s, %s) AS lk", (name, int(timeout_sec)))
+    row = cursor.fetchone()
+    return bool(row and row.get("lk") == 1)
+
+
+def _mysql_named_lock_release(cursor, name: str) -> None:
+    cursor.execute("SELECT RELEASE_LOCK(%s) AS rlk", (name,))
+    cursor.fetchone()
+
+
+def _next_global_display_token(cursor):
+    """
+    Smallest positive integer not used in orders, uncollected_tokens, or active checkout holds.
+    orders.token_number is globally UNIQUE in this schema.
+    """
+    cursor.execute("SELECT token_number FROM orders")
+    used = {row["token_number"] for row in cursor.fetchall()}
     cursor.execute("SELECT token_number FROM uncollected_tokens")
-    reserved_tokens = {row['token_number'] for row in cursor.fetchall()}
-
-    token_number = 1
-    while token_number in used_tokens_today or token_number in reserved_tokens:
-        token_number += 1
-
-    return token_number
+    used |= {row["token_number"] for row in cursor.fetchall()}
+    cursor.execute("SELECT token_number FROM checkout_token_holds")
+    used |= {row["token_number"] for row in cursor.fetchall()}
+    n = 1
+    while n in used:
+        n += 1
+    return n
 
 
 def _daily_cleanup_and_reset_at_startup():
@@ -536,6 +620,10 @@ def admin_required(f):
 def intro():
     return render_template('intro.html')
 
+@app.route('/admin')
+def admin_root():
+    return redirect(url_for('admin_login'))
+
 # Admin Login Page
 @app.route('/admin/login', methods=['GET', 'POST'])
 @limiter.limit("15 per minute")
@@ -568,11 +656,13 @@ def admin_login():
 
 @app.route("/login")
 def login_page():
-        return render_template("login.html")
+    if session.get("user_id"):
+        return redirect(url_for("home"))
+    return render_template("login.html")
 
 @app.route('/check-login', methods=['GET'])
 def check_login():
-    is_admin = bool(session.get('admin_id'))
+    is_admin = bool(session.get('admin_logged_in'))
     is_user = bool(session.get('user_id'))
     role = 'admin' if is_admin else ('user' if is_user else None)
     return jsonify({
@@ -711,13 +801,21 @@ def admin_dashboard():
     
     query = """
     SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
-           users.name AS user_name, orders.created_at, orders.total
+           users.name AS user_name, orders.created_at, orders.total,
+           fi.image AS food_image, fi.name AS food_name
     FROM orders
     JOIN users ON orders.user_id = users.id
+    LEFT JOIN (
+        SELECT oi.order_id, MIN(oi.id) AS first_item_id
+        FROM order_items oi
+        GROUP BY oi.order_id
+    ) first_oi ON first_oi.order_id = orders.id
+    LEFT JOIN order_items oi ON oi.id = first_oi.first_item_id
+    LEFT JOIN food_items fi ON fi.id = oi.food_id
     WHERE DATE(orders.created_at) = %s
 """
 
-    params = [datetime.now().date()]
+    params = [datetime.now(IST).date()]
 
     if status_filter != 'all':
         query += " AND orders.status = %s"
@@ -1232,32 +1330,6 @@ def admin_view_order(order_id):
 
     return render_template("admin_order_view.html", order=order_main_info, items=items, is_confirmable_now=is_confirmable_now)
 
-@app.route('/admin/orders/confirm/<int:order_id>', methods=['POST'])
-@admin_required
-def confirm_order(order_id):
-    conn, cursor = get_db_connection()
-    if not session.get('admin_logged_in'):
-        return redirect('/admin/login')
-
-    cursor.execute(
-        "SELECT user_id, token_number, payment_status FROM orders WHERE id = %s AND status = 'pending'",
-        (order_id,),
-    )
-    order_data = cursor.fetchone()
-
-    if not order_data:
-        return "Order not found or is not in a confirmable state.", 404
-
-    if order_data.get('payment_status') != 'paid':
-        return "Only paid orders can be confirmed.", 400
-
-    cursor.execute("UPDATE orders SET status = 'confirmed' WHERE id = %s", (order_id,))
-    
-    # You can add your notification logic here if needed
-    # create_notification(...)
-
-    return redirect(url_for('admin_dashboard'))
-
 @app.route('/admin/food/sell/<int:food_id>', methods=['POST'])
 @admin_required
 def manual_sell(food_id):
@@ -1319,19 +1391,24 @@ def scan_order(order_id):
 def get_uncollected_tokens():
     conn, cursor = get_db_connection()
 
+    # Use UNION to check both active orders and archived order_history
     query = """
-        SELECT ut.token_number, u.name as user_name, o.status as order_status, ut.order_date
+        SELECT ut.token_number,
+               u.name as user_name,
+               COALESCE(o.status, oh.status) as order_status,
+               ut.order_date
         FROM uncollected_tokens ut
-        JOIN orders o ON ut.order_id = o.id
-        JOIN users u ON o.user_id = u.id
+        LEFT JOIN orders o ON ut.order_id = o.id
+        LEFT JOIN order_history oh ON ut.order_id = oh.id
+        LEFT JOIN users u ON u.id = COALESCE(o.user_id, oh.user_id)
         ORDER BY ut.order_date DESC
     """
-    
+
     cursor.execute(query)
     tokens = cursor.fetchall()
 
     for token in tokens:
-        if isinstance(token['order_date'], datetime):
+        if isinstance(token.get('order_date'), datetime):
             token['order_date'] = token['order_date'].strftime('%d %b %Y, %I:%M %p')
 
     return jsonify(tokens)
@@ -1423,6 +1500,7 @@ RESERVATION_TIMEOUT_MINUTES = 10  # change as needed
 def release_expired_reservations(cursor, conn, minutes=RESERVATION_TIMEOUT_MINUTES):
     """
     Release any reserved rows older than `minutes`.
+    Also drop stale checkout token holds (abandoned Razorpay checkouts).
     """
     try:
         cursor.execute("""
@@ -1430,6 +1508,13 @@ def release_expired_reservations(cursor, conn, minutes=RESERVATION_TIMEOUT_MINUT
             SET availability = 'available', reserved_by = NULL, reserved_at = NULL
             WHERE availability = 'reserved' AND reserved_at < DATE_SUB(NOW(), INTERVAL %s MINUTE)
         """, (minutes,))
+        if _CHECKOUT_TOKEN_HOLDS_TABLE_OK:
+            cursor.execute(
+                """
+                DELETE FROM checkout_token_holds
+                WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                """
+            )
         conn.commit()
     except Exception as e:
         # Log but don't crash the flow
@@ -1454,6 +1539,8 @@ def order_single():
 
     conn, cursor = None, None
     reserved_by_me = False
+    user_lock_held = False
+    alloc_lock_held = False
     try:
         conn, cursor = get_db_connection()
         release_expired_reservations(cursor, conn)
@@ -1501,41 +1588,75 @@ def order_single():
 
         conn.commit()
 
-        token = _generate_daily_token_number()
-        notes = {
-            "user_id": str(user_id),
-            "food_id": str(food_id),
-            "quantity": str(qty),
-            "price": str(price),
-            "token_number": str(token)
-        }
+        _ensure_checkout_token_holds_table()
+        lock_user = f"{_CHECKOUT_USER_LOCK_PREFIX}{user_id}"
+        if not _mysql_named_lock_acquire(cursor, lock_user, CHECKOUT_USER_LOCK_TIMEOUT):
+            return jsonify({
+                'success': False,
+                'error': 'Another checkout is in progress on your account. Please wait and try again.',
+            }), 409
+        user_lock_held = True
+
+        if not _mysql_named_lock_acquire(cursor, _TOKEN_ALLOC_LOCK_NAME, TOKEN_ALLOC_LOCK_TIMEOUT):
+            _mysql_named_lock_release(cursor, lock_user)
+            user_lock_held = False
+            return jsonify({
+                'success': False,
+                'error': 'Server is busy. Please try again in a moment.',
+            }), 503
+        alloc_lock_held = True
 
         try:
-            razorpay_order = razorpay_client.order.create({
-                "amount": int(round(total * 100)),
-                "currency": "INR",
-                "receipt": f"single_{user_id}_{token}",
-                "notes": notes
-            })
-        except Exception as e:
-            # Razorpay order creation failed -> release reservation if we made one
-            if reserved_by_me:
-                cursor.execute("""
-                    UPDATE daily_menu
-                    SET availability = 'available', reserved_by = NULL, reserved_at = NULL
-                    WHERE food_id = %s AND DATE(available_date) = CURDATE() AND reserved_by = %s
-                """, (food_id, user_id))
-                conn.commit()
-            print("Error creating Razorpay order:", e)
-            return jsonify({'success': False, 'error': 'Could not create payment order.'}), 500
+            token = _next_global_display_token(cursor)
+            notes = {
+                "user_id": str(user_id),
+                "food_id": str(food_id),
+                "quantity": str(qty),
+                "price": str(price),
+                "token_number": str(token),
+            }
 
-        return jsonify({
-            'success': True,
-            'razorpay_order_id': razorpay_order['id'],
-            'amount': int(total * 100),
-            'key_id': RAZORPAY_KEY_ID,
-            'user_name': session.get('name', 'Customer')
-        })
+            try:
+                razorpay_order = razorpay_client.order.create({
+                    "amount": int(round(total * 100)),
+                    "currency": "INR",
+                    "receipt": f"single_{user_id}_{token}",
+                    "notes": notes,
+                })
+            except Exception as e:
+                if reserved_by_me:
+                    cursor.execute("""
+                        UPDATE daily_menu
+                        SET availability = 'available', reserved_by = NULL, reserved_at = NULL
+                        WHERE food_id = %s AND DATE(available_date) = CURDATE() AND reserved_by = %s
+                    """, (food_id, user_id))
+                    conn.commit()
+                print("Error creating Razorpay order:", e)
+                return jsonify({'success': False, 'error': 'Could not create payment order.'}), 500
+
+            cursor.execute(
+                """
+                INSERT INTO checkout_token_holds (token_number, razorpay_order_id, user_id)
+                VALUES (%s, %s, %s)
+                """,
+                (token, razorpay_order["id"], user_id),
+            )
+            conn.commit()
+
+            return jsonify({
+                'success': True,
+                'razorpay_order_id': razorpay_order['id'],
+                'amount': int(total * 100),
+                'key_id': RAZORPAY_KEY_ID,
+                'user_name': session.get('user_name', 'Customer'),
+            })
+        finally:
+            if alloc_lock_held:
+                _mysql_named_lock_release(cursor, _TOKEN_ALLOC_LOCK_NAME)
+                alloc_lock_held = False
+            if user_lock_held:
+                _mysql_named_lock_release(cursor, lock_user)
+                user_lock_held = False
 
     except Exception as e:
         if conn:
@@ -1557,13 +1678,19 @@ def order_all_from_cart():
 
     user_id = session.get('user_id')
     conn, cursor = get_db_connection()
+    user_lock_held = False
+    alloc_lock_held = False
+    lock_user = f"{_CHECKOUT_USER_LOCK_PREFIX}{user_id}"
 
     try:
+        _ensure_checkout_token_holds_table()
+        release_expired_reservations(cursor, conn)
+
         # Fetch cart items with food info
         cursor.execute("""
-            SELECT ci.food_id, ci.quantity, fi.price 
-            FROM cart_items ci 
-            JOIN food_items fi ON ci.food_id = fi.id 
+            SELECT ci.food_id, ci.quantity, fi.price, fi.name
+            FROM cart_items ci
+            JOIN food_items fi ON ci.food_id = fi.id
             WHERE ci.user_id = %s
         """, (user_id,))
         items = cursor.fetchall()
@@ -1571,60 +1698,102 @@ def order_all_from_cart():
         if not items:
             return jsonify({'success': False, 'error': 'Cart is empty'}), 400
 
-        # Validate stock for each item
+        # Lock and validate stock for each item atomically (prevents race conditions)
+        conn.start_transaction()
+        today = date.today()
+        current_time = datetime.now().time()
         for item in items:
             cursor.execute("""
-                SELECT stock FROM daily_menu 
-                WHERE food_id = %s AND DATE(available_date) = CURDATE()
-            """, (item['food_id'],))
+                SELECT stock FROM daily_menu
+                WHERE food_id = %s AND DATE(available_date) = %s
+                FOR UPDATE
+            """, (item['food_id'], today))
             stock_row = cursor.fetchone()
             if not stock_row or stock_row['stock'] < item['quantity']:
-                cursor.execute("SELECT name FROM food_items WHERE id = %s", (item['food_id'],))
-                food_name = cursor.fetchone()['name']
-                return jsonify({'success': False, 'error': f'{food_name} is out of stock'}), 400
+                conn.rollback()
+                return jsonify({'success': False, 'error': f"{item['name']} is out of stock or not on today's menu"}), 400
+
+        conn.rollback()  # Release the FOR UPDATE locks — we only needed the check
 
         # Convert Decimals to float
+        serializable_items = []
         for item in items:
-            item['quantity'] = int(item['quantity'])
-            item['price'] = float(item['price'])
+            serializable_items.append({
+                'food_id': int(item['food_id']),
+                'quantity': int(item['quantity']),
+                'price': float(item['price'])
+            })
 
-        total = sum(item['price'] * item['quantity'] for item in items)
+        total = sum(it['price'] * it['quantity'] for it in serializable_items)
 
         # Sanity check
         if total <= 0 or total > 50000:
             return jsonify({'success': False, 'error': 'Invalid order total'}), 400
 
-        token = _generate_daily_token_number()
+        if not _mysql_named_lock_acquire(cursor, lock_user, CHECKOUT_USER_LOCK_TIMEOUT):
+            return jsonify({
+                'success': False,
+                'error': 'Another checkout is in progress on your account. Please wait and try again.',
+            }), 409
+        user_lock_held = True
 
-        notes = {
-            "user_id": str(user_id),
-            "token_number": str(token),
-            "items": json.dumps(items)
-        }
+        if not _mysql_named_lock_acquire(cursor, _TOKEN_ALLOC_LOCK_NAME, TOKEN_ALLOC_LOCK_TIMEOUT):
+            _mysql_named_lock_release(cursor, lock_user)
+            user_lock_held = False
+            return jsonify({
+                'success': False,
+                'error': 'Server is busy. Please try again in a moment.',
+            }), 503
+        alloc_lock_held = True
 
-        # Create Razorpay order
-        razorpay_order = razorpay_client.order.create({
-            "amount": int(total * 100),
-            "currency": "INR",
-            "receipt": f"cart_{user_id}_{token}",
-            "notes": notes
-        })
+        try:
+            token = _next_global_display_token(cursor)
 
-        return jsonify({
-            'success': True,
-            'razorpay_order_id': razorpay_order['id'],
-            'amount': int(total * 100),
-            'key_id': RAZORPAY_KEY_ID,
-            'user_name': session.get('user_name', 'Customer')
-        })
+            notes = {
+                "user_id": str(user_id),
+                "token_number": str(token),
+                "items": json.dumps(serializable_items),
+            }
+
+            razorpay_order = razorpay_client.order.create({
+                "amount": int(round(total * 100)),
+                "currency": "INR",
+                "receipt": f"cart_{user_id}_{token}",
+                "notes": notes,
+            })
+
+            cursor.execute(
+                """
+                INSERT INTO checkout_token_holds (token_number, razorpay_order_id, user_id)
+                VALUES (%s, %s, %s)
+                """,
+                (token, razorpay_order["id"], user_id),
+            )
+            conn.commit()
+
+            return jsonify({
+                'success': True,
+                'razorpay_order_id': razorpay_order['id'],
+                'amount': int(round(total * 100)),
+                'key_id': RAZORPAY_KEY_ID,
+                'user_name': session.get('user_name', 'Customer'),
+            })
+        finally:
+            if alloc_lock_held:
+                _mysql_named_lock_release(cursor, _TOKEN_ALLOC_LOCK_NAME)
+                alloc_lock_held = False
+            if user_lock_held:
+                _mysql_named_lock_release(cursor, lock_user)
+                user_lock_held = False
 
     except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         print(f"Error creating cart order: {e}")
+        traceback.print_exc()
         return jsonify({'success': False, 'error': 'Could not create cart order.'}), 500
-    finally:
-        if conn and conn.is_connected():
-            cursor.close()
-            conn.close()
 
 
 
@@ -1675,9 +1844,23 @@ def payment_webhook():
             payment_entity = payload['payload']['payment']['entity']
             notes = payment_entity.get('notes', {}) or {}
             user_id_note = notes.get('user_id')
-            if user_id_note:
-                conn, cursor = get_db_connection()
-                try:
+            rz_order_id = payment_entity.get('order_id')
+            conn, cursor = get_db_connection()
+            try:
+                if rz_order_id:
+                    try:
+                        cursor.execute(
+                            "DELETE FROM checkout_token_holds WHERE razorpay_order_id = %s",
+                            (rz_order_id,),
+                        )
+                        conn.commit()
+                    except Exception as hold_err:
+                        print("checkout_token_holds delete on payment.failed:", hold_err)
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                if user_id_note:
                     cursor.execute("""
                         UPDATE daily_menu
                         SET availability = 'available', reserved_by = NULL, reserved_at = NULL
@@ -1685,15 +1868,15 @@ def payment_webhook():
                     """, (int(user_id_note),))
                     conn.commit()
                     print(f"Released reservations for user {user_id_note}")
-                except Exception as err:
-                    print("Error releasing reservations on payment.failed:", err)
-                    conn.rollback()
-                finally:
-                    if conn and conn.is_connected():
-                        cursor.close()
-                        conn.close()
-            else:
-                print("No user_id in notes; nothing to release.")
+                else:
+                    print("No user_id in notes; skipped daily_menu release.")
+            except Exception as err:
+                print("Error releasing reservations on payment.failed:", err)
+                conn.rollback()
+            finally:
+                if conn and conn.is_connected():
+                    cursor.close()
+                    conn.close()
         except Exception as e:
             print("Error processing payment.failed webhook:", e)
             traceback.print_exc()
@@ -1773,7 +1956,6 @@ def payment_webhook():
                 print(f"⚠️ Duplicate webhook: payment {razorpay_payment_id} already processed")
                 return 'Already processed', 200
 
-            # Insert order row
             cursor.execute("""
                 INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, razorpay_order_id, razorpay_payment_id)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
@@ -1839,6 +2021,14 @@ def payment_webhook():
                 except Exception as e:
                     print("Warning: Failed to clear cart_items:", e)
 
+            try:
+                cursor.execute(
+                    "DELETE FROM checkout_token_holds WHERE razorpay_order_id = %s",
+                    (razorpay_order_id,),
+                )
+            except Exception as he:
+                print("Warning: checkout_token_holds delete after payment:", he)
+
             # Commit everything
             conn.commit()
 
@@ -1855,6 +2045,41 @@ def payment_webhook():
 
             print(f"✅ Order #{order_id} saved successfully after payment")
 
+        except mysql_errors.IntegrityError as db_err:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            err_s = str(db_err).lower()
+            if db_err.errno == 1062 and "token_number" in err_s:
+                print("❌ Duplicate token_number on order insert; refunding:", db_err)
+                try:
+                    cursor.execute(
+                        "DELETE FROM checkout_token_holds WHERE razorpay_order_id = %s",
+                        (razorpay_order_id,),
+                    )
+                    conn.commit()
+                except Exception as ce:
+                    print("Hold cleanup after duplicate token failed:", ce)
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                try:
+                    razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
+                    print("Refund after duplicate token completed")
+                except Exception as ref_err:
+                    print("Refund after duplicate token failed:", ref_err)
+                return 'Duplicate token handled', 200
+            print("❌ IntegrityError:", db_err)
+            traceback.print_exc()
+            try:
+                razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
+                print("Attempted refund after IntegrityError")
+            except Exception as ref_err:
+                print("Refund attempt failed after IntegrityError:", ref_err)
+            return 'Internal error', 500
+
         except Exception as db_err:
             # Ensure rollback and attempt refund if necessary
             try:
@@ -1863,6 +2088,17 @@ def payment_webhook():
                 pass
             print("❌ Database transaction rolled back due to:", db_err)
             traceback.print_exc()
+            try:
+                cursor.execute(
+                    "DELETE FROM checkout_token_holds WHERE razorpay_order_id = %s",
+                    (razorpay_order_id,),
+                )
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
             # Attempt refund as a fallback (best-effort)
             try:
                 razorpay_client.payment.refund(razorpay_payment_id, {'amount': amount_paid})
@@ -1982,55 +2218,7 @@ def remove_cart():
     conn.commit()
     return '', 204
 
-@app.route('/order/cancel/<int:order_id>', methods=['POST'])
-@login_required
-def cancel_order(order_id):
-    conn, cursor = get_db_connection()
-    user_id = session.get('user_id')
-    if not user_id:
-        return jsonify({'success': False, 'error': 'Unauthorized. Please log in.'}), 401
 
-    try:
-        # Check if the order can be cancelled and get its creation time
-        cursor.execute("SELECT created_at, status FROM orders WHERE id = %s AND user_id = %s", (order_id, user_id))
-        order = cursor.fetchone()
-
-        if not order:
-            return jsonify({'success': False, 'error': 'Order not found or unauthorized.'}), 404
-
-        if order['status'] != 'pending':
-            return jsonify({'success': False, 'error': 'Order can no longer be cancelled.'}), 400
-
-        # Check if cancellation is within the 10-minute window
-        time_diff_minutes = (datetime.now() - order['created_at']).total_seconds() / 60
-        if time_diff_minutes > 10:
-            return jsonify({'success': False, 'error': 'Cancellation window expired.'}), 400
-
-        # 1. Get the items from the order before marking it as cancelled
-        cursor.execute("SELECT food_id, quantity FROM order_items WHERE order_id = %s", (order_id,))
-        items_to_restock = cursor.fetchall()
-
-        # 2. Update the order status
-        cursor.execute("UPDATE orders SET status = 'cancelled' WHERE id = %s", (order_id,))
-
-        today = date.today()
-
-        # 4. Loop through the fetched items and add the stock back to the daily menu
-        for item in items_to_restock:
-            cursor.execute("""
-                UPDATE daily_menu SET stock = stock + %s 
-                WHERE food_id = %s AND DATE(available_date) = %s
-            """, (item['quantity'], item['food_id'], today))
-
-        # 5. Commit all changes to the database at once
-        conn.commit()
-
-        return jsonify({'success': True, 'message': 'Order has been cancelled.'})
-
-    except mysql.connector.Error as err:
-        conn.rollback()
-        print(f"Database error during cancellation: {err}")
-        return jsonify({'success': False, 'error': 'A database error occurred.'}), 500
 
 @app.route('/settings')
 @login_required
@@ -2043,6 +2231,14 @@ def settings():
     user = cursor.fetchone()
     
     return render_template('settings.html', user=user)
+
+
+@app.route('/admin/settings')
+@admin_required
+def admin_settings():
+    if not session.get('admin_logged_in'):
+        return redirect('/admin/login')
+    return render_template('admin_settings.html', admin_username=session.get('admin_username', 'Admin'))
 
 @app.route('/logout', methods=['POST'])
 @login_required
@@ -2081,10 +2277,6 @@ def orders():
             order_items_list.append(item)
         order['items'] = order_items_list
 
-        time_diff = now - order['created_at']
-        order['can_cancel'] = order['status'] == 'pending' and time_diff.total_seconds() < 600
-        order['time_to_cancel'] = max(0, 600 - int(time_diff.total_seconds()))
-
         qr_data = f"OrderID:{order['id']} Token:{order['token_number']}"
         qr_img = qrcode.make(qr_data)
         buf = io.BytesIO()
@@ -2111,6 +2303,82 @@ def request_entity_too_large(error):
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify({'error': 'Too many requests. Please try again later.'}), 429
+
+
+@app.route('/menu')
+@login_required
+def menu():
+    """Redirect legacy /menu to /home (food listing is on home page)."""
+    return redirect(url_for('home'))
+
+
+@app.route('/api/admin/orders')
+@admin_required
+def api_admin_orders():
+    """JSON endpoint used by admin dashboard live-refresh JS (avoids full page scrape)."""
+    conn, cursor = get_db_connection()
+    status_filter = request.args.get('status', 'all')
+    sort_by = request.args.get('sort', 'newest')
+
+    allowed_statuses = ['all', 'pending', 'confirmed', 'delivered', 'cancelled']
+    allowed_sorts = ['newest', 'oldest']
+    if status_filter not in allowed_statuses:
+        status_filter = 'all'
+    if sort_by not in allowed_sorts:
+        sort_by = 'newest'
+
+    query = """
+        SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
+               users.name AS user_name, orders.created_at, orders.total,
+               fi.image AS food_image, fi.name AS food_name
+        FROM orders
+        JOIN users ON orders.user_id = users.id
+        LEFT JOIN (
+            SELECT oi.order_id, MIN(oi.id) AS first_item_id
+            FROM order_items oi
+            GROUP BY oi.order_id
+        ) first_oi ON first_oi.order_id = orders.id
+        LEFT JOIN order_items oi ON oi.id = first_oi.first_item_id
+        LEFT JOIN food_items fi ON fi.id = oi.food_id
+        WHERE DATE(orders.created_at) = %s
+    """
+    params = [datetime.now(IST).date()]
+    if status_filter != 'all':
+        query += " AND orders.status = %s"
+        params.append(status_filter)
+    query += " ORDER BY orders.created_at DESC" if sort_by == 'newest' else " ORDER BY orders.created_at ASC"
+
+    cursor.execute(query, tuple(params))
+    orders = cursor.fetchall()
+
+    now = datetime.now()
+    result = []
+    for order in orders:
+        elapsed = now - order['created_at']
+        secs = int(elapsed.total_seconds())
+        if secs < 60:
+            time_ago = f"{secs}s ago"
+        elif secs < 3600:
+            time_ago = f"{secs // 60}m ago"
+        else:
+            time_ago = f"{secs // 3600}h ago"
+
+        result.append({
+            'id': order['id'],
+            'token_number': order['token_number'],
+            'status': order['status'],
+            'payment_status': order['payment_status'],
+            'user_name': order['user_name'],
+            'food_image': order.get('food_image'),
+            'food_name': order.get('food_name') or 'Item',
+            'total': float(order['total']),
+            'created_at': order['created_at'].strftime('%d %b, %I:%M %p'),
+            'time_ago': time_ago,
+            'is_confirmable': order['status'] == 'pending' and order['payment_status'] == 'paid',
+        })
+
+    return jsonify(result)
+
 
 if __name__ == '__main__':
     _debug = os.getenv("FLASK_DEBUG", "").lower() in ("1", "true", "yes") and not _IS_PRODUCTION

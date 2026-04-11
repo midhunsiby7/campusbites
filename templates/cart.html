@@ -2,12 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Your Cart - CAMPUSBITES</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script>const CSRF_TOKEN = {{ csrf_token|tojson }};</script>
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="cart-list">
 <div class="home-body has-bottom-nav">
@@ -15,7 +16,7 @@
 
   {% for item in cart_items %}
     <div class="cart-item" data-id="{{ item.id }}" data-food-id="{{ item.food_id }}">
-      <img src="{{ url_for('static', filename='uploads/' + item.image) }}" alt="{{ item.name }}">
+      <img src="{{ url_for('static', filename='uploads/' + (item.image if item.image else 'default.png')) }}" alt="{{ item.name }}">
       <div class="info">
         <h4>{{ item.name }}</h4>
         <p>₹{{ item.price }}</p>

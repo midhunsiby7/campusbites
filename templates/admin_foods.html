@@ -2,19 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Manage Foods - CAMPUSBITES</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="home-body has-bottom-nav">
 
   <header class="admin-header">
     <h1>Manage Foods</h1>
     <nav>
-      <a href="/admin/dashboard">Dashboard</a>
+      <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
       <a href="/admin/add-food">Add Food</a>
-      <a href="/admin/todays-menu">Set Menu</a>
-      <a href="/admin/scan-qr">Scan QR</a>
+      <a href="{{ url_for('admin_todays_menu') }}">Set Menu</a>
+      <a href="{{ url_for('scan_qr') }}">Scan QR</a>
       <form action="{{ url_for('admin_logout') }}" method="POST" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="logout-btn" type="submit">Logout</button>
@@ -43,7 +45,7 @@
             <td data-label="ID">{{ food.id }}</td>
             <td data-label="Image">
               {% if food.image %}
-                <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="{{ food.name }}" class="food-thumbnail">
+                <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}" class="food-thumbnail">
               {% else %}
                 No Image
               {% endif %}

@@ -2,9 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>CampusBites - Today's Menu</title>
+  <meta name="description" content="Browse and order today's fresh campus food items.">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="home-body">
   <div class="home-body has-bottom-nav">
@@ -24,7 +27,7 @@
 
     {% for food in foods %}
     <div class="food-item" onclick="location.href='/food/{{ food.id }}'" data-food-id="{{ food.id }}">
-      <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="{{ food.name }}">
+      <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
       <h4>{{ food.name }}</h4>
       <p>₹{{ food.price }}</p>
       <p><strong>Available:</strong> <span class="stock-count">{{ food.stock }}</span></p>

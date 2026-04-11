@@ -3,10 +3,13 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Admin Dashboard - CampusBites</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260410b">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=20260410b">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="admin-body">
   <header class="admin-header">
@@ -15,6 +18,7 @@
       <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
       <a href="{{ url_for('admin_todays_menu') }}" class="admin-nav-btn">Menu</a>
       <a href="{{ url_for('scan_qr') }}" class="admin-nav-btn">Scan QR</a>
+      <a href="{{ url_for('admin_settings') }}" class="admin-nav-btn">Settings</a>
       <button class="admin-nav-btn" onclick="openUncollectedTokensPopup()">Uncollected Tokens</button>
       <form action="{{ url_for('admin_logout') }}" method="POST" class="logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -24,7 +28,7 @@
   </header>
 
   <main class="admin-main">
-    <form method="get" action="/admin/dashboard" class="admin-filter-form">
+    <form method="get" action="/admin/dashboard" class="admin-filter-form" id="filter-form">
       <div class="filter-row">
         <select name="status" id="statusFilter">
           <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
@@ -38,11 +42,10 @@
       </div>
       <div class="filter-row">
         <input type="text" name="search" id="searchInput" placeholder="Search by name or token...">
-        <!-- Apply button removed -->
       </div>
     </form>
 
-    <div class="orders-wrapper">
+    <div class="orders-wrapper" id="orders-wrapper">
       {% for order in orders %}
       <div class="order-card" data-id="{{ order.id }}" data-status="{{ order.status }}">
         <div class="order-header">
@@ -55,21 +58,26 @@
             <span class="badge status-badge">{{ order.status|capitalize }}</span>
           {% endif %}
         </div>
-        <div class="order-body">
-          <p><strong>Token No:</strong> {{ order.token_number }}</p>
-          <p><strong>User:</strong> {{ order.user_name }}</p>
-          <p><strong>Total:</strong> ₹{{ order.total }}</p>
-          <p><strong>Time:</strong> {{ order.created_at.strftime('%d %b, %I:%M %p') if order.created_at else 'N/A' }}</p>
-          {% if order.time_ago %}<p class="ago">({{ order.time_ago }})</p>{% endif %}
+        <div class="order-body order-body-grid">
+          <div class="order-thumb-wrap">
+            {% if order.food_image %}
+              <img class="order-thumb" src="{{ url_for('static', filename='uploads/' + order.food_image) }}" alt="{{ order.food_name or 'Food image' }}">
+            {% else %}
+              <div class="order-thumb order-thumb-fallback">No image</div>
+            {% endif %}
+          </div>
+          <div class="order-meta">
+            <p><strong>Token No:</strong> {{ order.token_number }}</p>
+            <p><strong>User:</strong> {{ order.user_name }}</p>
+            <p><strong>Item:</strong> {{ order.food_name or 'Item' }}</p>
+            <p><strong>Total:</strong> ₹{{ order.total }}</p>
+            <p><strong>Time:</strong> {{ order.created_at.strftime('%d %b, %I:%M %p') if order.created_at else 'N/A' }}</p>
+            {% if order.time_ago %}<p class="ago">({{ order.time_ago }})</p>{% endif %}
+          </div>
         </div>
         <div class="order-actions">
           <a href="{{ url_for('admin_view_order', order_id=order.id) }}" class="btn">View</a>
-          {% if order.status == 'paid' %}
-            <form action="{{ url_for('admin_confirm_order', order_id=order.id) }}" method="post">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit" class="action-btn confirm">Confirm</button>
-            </form>
-          {% elif order.status == 'confirmed' %}
+          {% if order.status == 'confirmed' %}
             <form action="{{ url_for('mark_delivered', order_id=order.id) }}" method="post">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="action-btn deliver">Deliver</button>
@@ -77,113 +85,196 @@
           {% endif %}
         </div>
       </div>
+      {% else %}
+      <p style="text-align:center; color: var(--text-muted); margin-top:20px;">No orders today.</p>
       {% endfor %}
     </div>
   </main>
 
   <script>
-const searchInput = document.getElementById("searchInput");
-const sortSelect = document.getElementById("sortSelect");
-const statusFilter = document.getElementById("statusFilter");
+  const CSRF_TOKEN = document.querySelector('meta[name="csrf-token"]').content;
+  const searchInput = document.getElementById("searchInput");
+  const sortSelect = document.getElementById("sortSelect");
+  const statusFilter = document.getElementById("statusFilter");
 
-if (searchInput) searchInput.addEventListener("input", filterTable);
-if (sortSelect) sortSelect.addEventListener("change", applyFilters);
-if (statusFilter) statusFilter.addEventListener("change", applyFilters);
+  if (searchInput) searchInput.addEventListener("input", filterCards);
+  if (sortSelect) sortSelect.addEventListener("change", filterCards);
+  if (statusFilter) statusFilter.addEventListener("change", filterCards);
 
-function filterTable() {
-  const query = searchInput.value.trim().toLowerCase();
-  const status = statusFilter.value;
-  const sortOrder = sortSelect.value;
-  const cards = Array.from(document.querySelectorAll(".order-card"));
-  let visibleCount = 0;
+  function filterCards() {
+    const query = (searchInput?.value || '').trim().toLowerCase();
+    const status = statusFilter?.value || 'all';
+    const sortOrder = sortSelect?.value || 'newest';
+    const cards = Array.from(document.querySelectorAll(".order-card"));
+    let visibleCount = 0;
 
-  cards.forEach(card => {
-    const tokenNum = card.querySelector(".order-header strong")?.innerText.replace("#", "").trim().toLowerCase() || "";
-    const userName = card.querySelector(".order-body p:nth-child(1)")?.innerText.split(":")[1]?.trim().toLowerCase() || "";
+    cards.forEach(card => {
+      const tokenText = card.querySelector(".order-body p:nth-child(1)")?.innerText.toLowerCase() || "";
+      const userText = card.querySelector(".order-body p:nth-child(2)")?.innerText.toLowerCase() || "";
+      const matchesQuery = !query || tokenText.includes(query) || userText.includes(query);
+      const matchesStatus = status === "all" || card.dataset.status === status;
 
-    const matchesQuery = !query || tokenNum.includes(query) || userName.includes(query);
-    const matchesStatus = status === "all" || card.dataset.status === status;
-
-    if (matchesQuery && matchesStatus) {
-      card.style.display = "flex";
-      visibleCount++;
-    } else {
-      card.style.display = "none";
-    }
-  });
-
-  // Sort visible cards
-  const wrapper = document.querySelector(".orders-wrapper");
-  const visibleCards = cards.filter(c => c.style.display !== "none");
-  visibleCards.sort((a, b) => {
-    const idA = parseInt(a.dataset.id);
-    const idB = parseInt(b.dataset.id);
-    return sortOrder === "newest" ? idB - idA : idA - idB;
-  });
-  wrapper.innerHTML = "";
-  visibleCards.forEach(c => wrapper.appendChild(c));
-
-  // Show "no results" message if nothing found
-  if (visibleCount === 0) {
-    wrapper.innerHTML = `<p style="text-align:center; color:#777; margin-top:20px;">No matching orders found</p>`;
-  }
-  if (searchInput) {
-  ["input", "keyup", "change"].forEach(evt => {
-    searchInput.addEventListener(evt, () => {
-      filterTable();
-    });
-  });
-}
-
-}
-
-function applyFilters() {
-  filterTable();
-}
-
-let latestOrderId = parseInt(document.querySelector('.order-card')?.dataset.id || '0');
-
-async function liveUpdateDashboard() {
-  try {
-    const response = await fetch(window.location.href);
-    const html = await response.text();
-    const newDoc = new DOMParser().parseFromString(html, 'text/html');
-    const newCards = newDoc.querySelector('.orders-wrapper');
-
-    if (newCards && newCards.children.length > 0) {
-      const newFirstOrder = newCards.querySelector('.order-card');
-      const newFirstOrderId = parseInt(newFirstOrder?.dataset.id || '0');
-      if (newFirstOrderId > latestOrderId) {
-        latestOrderId = newFirstOrderId;
+      if (matchesQuery && matchesStatus) {
+        card.style.display = "flex";
+        visibleCount++;
+      } else {
+        card.style.display = "none";
       }
-      document.querySelector('.orders-wrapper').innerHTML = newCards.innerHTML;
+    });
+
+    // Sort visible cards
+    const wrapper = document.getElementById("orders-wrapper");
+    const visibleCards = cards.filter(c => c.style.display !== "none");
+    visibleCards.sort((a, b) => {
+      const idA = parseInt(a.dataset.id);
+      const idB = parseInt(b.dataset.id);
+      return sortOrder === "newest" ? idB - idA : idA - idB;
+    });
+    visibleCards.forEach(c => wrapper.appendChild(c));
+
+    if (visibleCount === 0) {
+      if (!document.getElementById("no-results-msg")) {
+        const msg = document.createElement("p");
+        msg.id = "no-results-msg";
+        msg.style.cssText = "text-align:center; color: var(--text-muted); margin-top:20px;";
+        msg.innerText = "No matching orders found";
+        wrapper.appendChild(msg);
+      }
+    } else {
+      document.getElementById("no-results-msg")?.remove();
+    }
+  }
+
+  // ── Live refresh via JSON API (safe: does NOT replace CSRF tokens) ──
+  function buildCardHTML(order) {
+    let badgeHTML = '';
+    if (order.status === 'confirmed' && order.payment_status === 'paid') {
+      badgeHTML = `<span class="badge status-badge">Confirmed and Paid</span>`;
+    } else {
+      badgeHTML = `<span class="badge status-badge">${order.status.charAt(0).toUpperCase() + order.status.slice(1)}</span>`;
     }
 
-    // Re-apply current filters instantly after refresh
-    filterTable();
+    let actionsHTML = `<a href="/admin/order/${order.id}" class="btn">View</a>`;
+    if (order.status === 'confirmed') {
+      actionsHTML += `
+        <form action="/admin/deliver/${order.id}" method="post">
+          <input type="hidden" name="csrf_token" value="${CSRF_TOKEN}">
+          <button type="submit" class="action-btn deliver">Deliver</button>
+        </form>`;
+    }
 
-  } catch (err) {
-    console.error("Live update failed", err);
+    return `
+      <div class="order-card" data-id="${order.id}" data-status="${order.status}">
+        <div class="order-header">
+          <div><small>Order ID: ${order.id}</small></div>
+          ${badgeHTML}
+        </div>
+        <div class="order-body order-body-grid">
+          <div class="order-thumb-wrap">
+            ${order.food_image
+              ? `<img class="order-thumb" src="/static/uploads/${order.food_image}" alt="${order.food_name || 'Food image'}">`
+              : `<div class="order-thumb order-thumb-fallback">No image</div>`}
+          </div>
+          <div class="order-meta">
+            <p><strong>Token No:</strong> ${order.token_number}</p>
+            <p><strong>User:</strong> ${order.user_name}</p>
+            <p><strong>Item:</strong> ${order.food_name || 'Item'}</p>
+            <p><strong>Total:</strong> ₹${order.total.toFixed(2)}</p>
+            <p><strong>Time:</strong> ${order.created_at}</p>
+            <p class="ago">(${order.time_ago})</p>
+          </div>
+        </div>
+        <div class="order-actions">${actionsHTML}</div>
+      </div>`;
   }
-}
 
-document.addEventListener('DOMContentLoaded', () => {
-  filterTable();
-  setInterval(liveUpdateDashboard, 5000);
-});
+  async function liveUpdateDashboard() {
+    try {
+      const status = statusFilter?.value || 'all';
+      const sort = sortSelect?.value || 'newest';
+      const res = await fetch(`/api/admin/orders?status=${status}&sort=${sort}`);
+      if (!res.ok) return;
+      const orders = await res.json();
 
-// Preserve scroll position
-window.addEventListener("beforeunload", function () {
-  sessionStorage.setItem("scrollPos", window.scrollY);
-});
-window.addEventListener("load", function () {
-  const scrollPos = sessionStorage.getItem("scrollPos");
-  if (scrollPos !== null) {
-    window.scrollTo(0, parseInt(scrollPos));
-    sessionStorage.removeItem("scrollPos");
+      const wrapper = document.getElementById("orders-wrapper");
+      const existingIds = new Set(Array.from(wrapper.querySelectorAll(".order-card")).map(c => c.dataset.id));
+      const newIds = new Set(orders.map(o => String(o.id)));
+
+      // Add new orders
+      let hasNew = false;
+      for (const order of orders) {
+        if (!existingIds.has(String(order.id))) {
+          wrapper.insertAdjacentHTML('afterbegin', buildCardHTML(order));
+          hasNew = true;
+        } else {
+          // Update existing card's status badge and actions
+          const card = wrapper.querySelector(`.order-card[data-id="${order.id}"]`);
+          if (card && card.dataset.status !== order.status) {
+            card.outerHTML = buildCardHTML(order);
+          }
+          // Update time_ago
+          const agoEl = wrapper.querySelector(`.order-card[data-id="${order.id}"] .ago`);
+          if (agoEl) agoEl.innerText = `(${order.time_ago})`;
+        }
+      }
+
+      // Remove orders no longer in today's list
+      wrapper.querySelectorAll(".order-card").forEach(card => {
+        if (!newIds.has(card.dataset.id)) card.remove();
+      });
+
+      if (orders.length === 0 && !wrapper.querySelector(".order-card")) {
+        if (!document.getElementById("no-orders-msg")) {
+          wrapper.innerHTML = `<p id="no-orders-msg" style="text-align:center; color: var(--text-muted); margin-top:20px;">No orders today.</p>`;
+        }
+      } else {
+        document.getElementById("no-orders-msg")?.remove();
+      }
+
+      filterCards();
+
+    } catch (err) {
+      console.error("Live update failed", err);
+    }
   }
-});
-</script>
+
+  document.addEventListener('DOMContentLoaded', () => {
+    filterCards();
+    setInterval(liveUpdateDashboard, 5000);
+  });
+
+  // Preserve scroll position
+  window.addEventListener("beforeunload", () => sessionStorage.setItem("scrollPos", window.scrollY));
+  window.addEventListener("load", () => {
+    const scrollPos = sessionStorage.getItem("scrollPos");
+    if (scrollPos !== null) {
+      window.scrollTo(0, parseInt(scrollPos));
+      sessionStorage.removeItem("scrollPos");
+    }
+  });
+
+  function openUncollectedTokensPopup() {
+    fetch('/admin/uncollected-tokens')
+      .then(res => res.json())
+      .then(tokens => {
+        if (!tokens.length) {
+          return Swal.fire('No Uncollected Tokens', 'All tokens have been collected.', 'info');
+        }
+        const rows = tokens.map(t =>
+          `<tr><td>${t.token_number}</td><td>${t.user_name || 'N/A'}</td><td>${t.order_status || 'N/A'}</td><td>${t.order_date}</td></tr>`
+        ).join('');
+        Swal.fire({
+          title: 'Uncollected Tokens',
+          html: `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr><th>Token</th><th>User</th><th>Status</th><th>Date</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`,
+          width: '700px'
+        });
+      })
+      .catch(() => Swal.fire('Error', 'Could not load uncollected tokens.', 'error'));
+  }
+  </script>
 
 </body>
 </html>

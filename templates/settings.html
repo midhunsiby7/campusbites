@@ -2,12 +2,14 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Settings - CAMPUSBITES</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
-<body class="home-body has-bottom-nav">
+<body class="home-body has-bottom-nav settings-page">
   <div class="settings-container">
+    <div id="theme-toggle-root"></div>
     <h2>Settings</h2>
     <div>
         <p><strong>Name:</strong> {{ user.name }}</p>

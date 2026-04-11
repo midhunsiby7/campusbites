@@ -3,11 +3,49 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Your Orders</title>
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script>const CSRF_TOKEN = {{ csrf_token|tojson }};</script>
+  <style>
+    /* QR Overlay & Card Styling */
+    .qr-overlay {
+      display: none; position: fixed; z-index: 9999; left: 0; top: 0;
+      width: 100%; height: 100%; background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(5px); display: flex; align-items: center; justify-content: center;
+      opacity: 0; animation: fadeInOverlay 0.3s forwards;
+    }
+    .qr-card {
+      background: #fff; width: 90%; max-width: 360px; border-radius: 20px;
+      padding: 1.5rem; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      transform: scale(0.9); animation: scaleUp 0.3s forwards;
+    }
+    .qr-header {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;
+    }
+    .qr-header h3 { margin: 0; font-size: 1.25rem; color: #222; font-weight: 700; }
+    .qr-close-icon {
+      background: none; border: none; font-size: 28px; line-height: 1; color: #999; cursor: pointer;
+      padding: 0; margin-top: -5px; transition: color 0.2s;
+    }
+    .qr-close-icon:hover { color: #f43f5e; }
+    .qr-frame {
+      background: #f8f9fa; padding: 15px; border-radius: 16px; border: 2px dashed #ccc;
+      margin-bottom: 1rem; display: inline-block;
+    }
+    #qr-img { width: 220px; height: 220px; object-fit: contain; display: block; border-radius: 8px; }
+    .qr-instruction { font-size: 0.9rem; color: #666; margin-bottom: 1.5rem; line-height: 1.4; }
+    .qr-close-btn {
+      background: linear-gradient(135deg, #3b82f6, #2563eb); color: white; border: none; width: 100%;
+      padding: 14px; border-radius: 12px; font-weight: 600; font-size: 1rem; cursor: pointer;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .qr-close-btn:active { transform: scale(0.96); }
+    @keyframes fadeInOverlay { to { opacity: 1; } }
+    @keyframes scaleUp { to { transform: scale(1); } }
+  </style>
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="orders-page">
   <div class="order-container">
@@ -41,7 +79,7 @@
                 <h4>Items:</h4>
                 {% for item in order['items'] %}
                   <div class="food-item-entry">
-                    <img src="{{ url_for('static', filename='uploads/' + item.image) }}" alt="{{ item.name }}">
+                    <img src="{{ url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
                     <span>{{ item.name }} × {{ item.quantity }} (₹{{ item.price }} each)</span>
                   </div>
                 {% endfor %}
@@ -76,7 +114,7 @@
                 <h4>Items:</h4>
                 {% for item in order['items'] %}
                   <div class="food-item-entry">
-                    <img src="{{ url_for('static', filename='uploads/' + item.image) }}" alt="{{ item.name }}">
+                    <img src="{{ url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
                     <span>{{ item.name }} × {{ item.quantity }} (₹{{ item.price }} each)</span>
                   </div>
                 {% endfor %}
@@ -92,103 +130,39 @@
     </div>
   </div>
 
-  <!-- QR Code Popup -->
-  <div id="qr-popup" class="popup" style="display:none;">
-    <div class="popup-content">
-      <h3>Scan to Verify</h3>
-      <img id="qr-img" src="" width="100%">
-      <button onclick="closeQRPopup()">Close</button>
+  <!-- Stylized QR Code Popup -->
+  <div id="qr-popup-container" class="qr-overlay" style="display:none;">
+    <div class="qr-card">
+      <div class="qr-header">
+        <h3>Order Verification</h3>
+        <button class="qr-close-icon" onclick="closeQRPopup()">×</button>
+      </div>
+      <div class="qr-body">
+        <div class="qr-frame">
+          <img id="qr-img" src="" alt="Verification QR Code">
+        </div>
+        <p class="qr-instruction">Show this code at the canteen counter to instantly collect your items.</p>
+      </div>
+      <button class="qr-close-btn" onclick="closeQRPopup()">Done</button>
     </div>
   </div>
 
-
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script> {# Add SweetAlert2 CDN #}
+  <!-- SweetAlert2 already loaded in <head> -->
   <script>
     function showQR(base64) {
       document.getElementById('qr-img').src = 'data:image/png;base64,' + base64;
-      document.getElementById('qr-popup').style.display = 'flex';
+      const popup = document.getElementById('qr-popup-container');
+      popup.style.display = 'flex';
+      popup.style.animation = 'none'; popup.offsetHeight; // trigger reflow
+      popup.style.animation = 'fadeInOverlay 0.3s forwards';
     }
 
     function closeQRPopup() {
-      document.getElementById('qr-popup').style.display = 'none';
-    }
-
-    function cancelOrder(orderId) {
-        Swal.fire({
-            title: 'Are you sure?',
-            text: "You won't be able to revert this!",
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#3085d6',
-            cancelButtonColor: '#d33',
-            confirmButtonText: 'Yes, cancel it!'
-        }).then((result) => {
-            if (result.isConfirmed) {
-                fetch(`/order/cancel/${orderId}`, {
-                    method: 'POST',
-                    headers: { 'X-CSRF-Token': CSRF_TOKEN }
-                }).then(res => {
-                    if (res.ok) {
-                        Swal.fire(
-                            'Cancelled!',
-                            'Your order has been cancelled.',
-                            'success'
-                        ).then(() => {
-                            location.reload();
-                        });
-                    } else {
-                        res.text().then(text => {
-                            Swal.fire(
-                                'Error!',
-                                text || 'Failed to cancel order.',
-                                'error'
-                            );
-                        });
-                    }
-                }).catch(error => {
-                    console.error('Error cancelling order:', error);
-                    Swal.fire(
-                        'Error!',
-                        'Network error or server issue.',
-                        'error'
-                    );
-                });
-            }
-        });
-    }
-
-    function updateCountdown() {
-        document.querySelectorAll('.cancel-timer').forEach(timerElement => {
-            let secondsLeft = parseInt(timerElement.dataset.secondsLeft);
-
-            if (secondsLeft > 0) {
-                secondsLeft--;
-                const minutes = Math.floor(secondsLeft / 60);
-                const seconds = secondsLeft % 60;
-                timerElement.innerText = `${minutes}:${String(seconds).padStart(2, '0')}`;
-                timerElement.dataset.secondsLeft = secondsLeft;
-
-                if (secondsLeft <= 0) {
-                    const orderId = timerElement.dataset.orderId;
-                    const cancelButton = document.getElementById(`cancel-btn-${orderId}`);
-                    const cancelNote = document.getElementById(`cancel-note-${orderId}`);
-                    if (cancelButton) {
-                        cancelButton.disabled = true;
-                        cancelButton.innerText = 'Cancellation Expired';
-                    }
-                    if (cancelNote) {
-                        cancelNote.innerText = 'Cancellation window expired.';
-                    }
-                }
-            }
-        });
+      document.getElementById('qr-popup-container').style.display = 'none';
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.cancel-timer').forEach(timerElement => {
-            timerElement.dataset.orderId = timerElement.getAttribute('data-order-id');
-        });
-        setInterval(updateCountdown, 1000);
+        // No timer needed, orders are strictly final.
     });
 
   </script>

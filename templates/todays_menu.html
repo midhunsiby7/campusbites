@@ -1,11 +1,15 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Today's Menu - Admin</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
+
 <body class="admin-body">
 
   <header class="admin-header">
@@ -21,8 +25,8 @@
   </header>
 
   <!-- ... (HEAD & HEADER SAME) ... -->
-<main class="admin-main">
-  {% if today_menu %}
+  <main class="admin-main">
+    {% if today_menu %}
     <!-- ✅ CURRENT MENU DISPLAY -->
     <div class="current-menu-container">
       <h2>Current Menu for Today</h2>
@@ -30,9 +34,11 @@
       <div class="menu-category-display card">
         <h3>{{ category.capitalize() }}</h3>
         {% if category == 'breakfast' and breakfast_times.start %}
-          <p class="time-display">Serving from {{ breakfast_times.start.strftime('%I:%M %p') }} to {{ breakfast_times.end.strftime('%I:%M %p') }}</p>
+        <p class="time-display">Serving from {{ breakfast_times.start.strftime('%I:%M %p') }} to {{
+          breakfast_times.end.strftime('%I:%M %p') }}</p>
         {% elif category == 'lunch' and lunch_times.start %}
-          <p class="time-display">Serving from {{ lunch_times.start.strftime('%I:%M %p') }} to {{ lunch_times.end.strftime('%I:%M %p') }}</p>
+        <p class="time-display">Serving from {{ lunch_times.start.strftime('%I:%M %p') }} to {{
+          lunch_times.end.strftime('%I:%M %p') }}</p>
         {% endif %}
         <ul class="item-list">
           {% for item in items %}
@@ -44,14 +50,15 @@
 
       <div class="menu-actions">
         <a href="{{ url_for('admin_todays_menu', edit='true') }}" class="btn">Edit Menu</a>
-        <form action="/admin/todays-menu?action=delete" method="POST" onsubmit="return confirm('Are you sure you want to delete the entire menu for today?');">
+        <form action="/admin/todays-menu?action=delete" method="POST"
+          onsubmit="return confirm('Are you sure you want to delete the entire menu for today?');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit" class="btn btn-danger">Delete Menu</button>
         </form>
 
 
       </div>
-      
+
     </div>
 
     <!-- ✅ SHOW EDIT MENU FORM ONLY IF ?edit=true -->
@@ -64,13 +71,17 @@
         <div class="time-inputs">
           <div>
             <label>Breakfast Time (Start - End)</label>
-            <input type="time" name="breakfast_start" value="{{ breakfast_times.start.strftime('%H:%M') if breakfast_times.start else default_breakfast_start }}">
-            <input type="time" name="breakfast_end" value="{{ breakfast_times.end.strftime('%H:%M') if breakfast_times.end else default_breakfast_end }}">
+            <input type="time" name="breakfast_start"
+              value="{{ breakfast_times.start.strftime('%H:%M') if breakfast_times.start else default_breakfast_start }}">
+            <input type="time" name="breakfast_end"
+              value="{{ breakfast_times.end.strftime('%H:%M') if breakfast_times.end else default_breakfast_end }}">
           </div>
           <div>
             <label>Lunch Time (Start - End)</label>
-            <input type="time" name="lunch_start" value="{{ lunch_times.start.strftime('%H:%M') if lunch_times.start else default_lunch_start }}">
-            <input type="time" name="lunch_end" value="{{ lunch_times.end.strftime('%H:%M') if lunch_times.end else default_lunch_end }}">
+            <input type="time" name="lunch_start"
+              value="{{ lunch_times.start.strftime('%H:%M') if lunch_times.start else default_lunch_start }}">
+            <input type="time" name="lunch_end"
+              value="{{ lunch_times.end.strftime('%H:%M') if lunch_times.end else default_lunch_end }}">
           </div>
         </div>
 
@@ -78,12 +89,12 @@
         <h3>Edit Stock for Current Items</h3>
         <div class="food-selection-grid">
           {% for category, items in today_menu.items() %}
-            {% for item in items %}
-            <div class="food-check-item">
-              <label for="stock_{{ item.food_id }}">{{ item.name }}</label>
-              <input type="number" name="stock_{{ item.food_id }}" value="{{ item.stock }}" min="0">
-            </div>
-            {% endfor %}
+          {% for item in items %}
+          <div class="food-check-item">
+            <label for="stock_{{ item.food_id }}">{{ item.name }}</label>
+            <input type="number" name="stock_{{ item.food_id }}" value="{{ item.stock }}" min="0">
+          </div>
+          {% endfor %}
           {% endfor %}
         </div>
 
@@ -106,11 +117,11 @@
     </div>
     {% endif %}
 
-  {% else %}
+    {% else %}
     <!-- ✅ SET MENU FOR TODAY IF EMPTY -->
     <div class="form-container menu-form">
       <h2>Set Menu for Today</h2>
-              <button id="runAutoMenuBtn" type="button" class="btn">Run Auto Menu Now</button>
+      <button id="runAutoMenuBtn" type="button" class="btn">Run Auto Menu Now</button>
       <form method="POST" action="/admin/todays-menu?action=set">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="time-inputs">
@@ -151,32 +162,33 @@
         <button type="submit" class="btn btn-primary btn-full">Set Today's Menu</button>
       </form>
     </div>
-  {% endif %}
-</main>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-<script>
-document.getElementById("runAutoMenuBtn").addEventListener("click", () => {
-  fetch("/admin/run-auto-menu", {
-    method: "POST",
-    headers: { "X-CSRF-Token": {{ csrf_token|tojson }} }
+    {% endif %}
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+  <script>
+    document.getElementById("runAutoMenuBtn").addEventListener("click", () => {
+      fetch("/admin/run-auto-menu", {
+        method: "POST",
+        headers: { "X-CSRF-Token": {{ csrf_token|tojson }} }
   })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        Swal.fire("Success!", data.message, "success").then(() => location.reload());
-      } else {
-        Swal.fire("Error!", data.message, "error");
-      }
-    })
-    .catch(() => Swal.fire("Error!", "Something went wrong.", "error"));
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          Swal.fire("Success!", data.message, "success").then(() => location.reload());
+        } else {
+          Swal.fire("Error!", data.message, "error");
+        }
+      })
+      .catch(() => Swal.fire("Error!", "Something went wrong.", "error"));
 });
 
-  document.addEventListener("DOMContentLoaded", () => {
-    if (window.location.search.includes("edit=true")) {
-      const form = document.getElementById("edit-menu-form");
-      if (form) form.scrollIntoView({ behavior: "smooth" });
-    }
-  });
-</script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (window.location.search.includes("edit=true")) {
+        const form = document.getElementById("edit-menu-form");
+        if (form) form.scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  </script>
 </body>
+
 </html>

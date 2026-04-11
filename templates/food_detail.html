@@ -2,20 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>{{ food.name }} - CAMPUSBITES</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/food.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260410b">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/food.css') }}?v=20260410b">
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>const CSRF_TOKEN = {{ csrf_token|tojson }};</script>
 
+  <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="food-detail-body">
     <div class="home-body has-bottom-nav">
   <div class="food-detail-container"
        data-food-id="{{ food.id }}"
        data-food-price="{{ food.price }}">
-    <img src="{{ url_for('static', filename='uploads/' + food.image) }}" alt="{{ food.name }}">
+    <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
     <h2>{{ food.name }}</h2>
     <p class="price">Price: ₹{{ food.price }}</p>
     <p class="stock">Available: <span id="current-stock">{{ food.stock }}</span></p>
@@ -32,7 +34,7 @@
   <div id="review-popup" class="popup">
     <div class="popup-content">
       <h3>Confirm Order</h3>
-      <img src="{{ url_for('static', filename='uploads/' + food.image) }}" width="100%" alt="{{ food.name }}">
+      <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" width="100%" alt="{{ food.name }}">
       <p>{{ food.name }} - ₹{{ food.price }}</p>
       <label>Quantity:
         <input type="number" id="order-qty" value="1" min="1" max="{{ food.stock }}" oninput="calculateTotal()">
@@ -125,7 +127,7 @@
 function confirmOrder() {
     const container = document.querySelector('.food-detail-container');
     const foodId = parseInt(container.dataset.foodId);
-    const quantity = parseInt(document.getElementById('qty').value);
+    const quantity = parseInt(document.getElementById('order-qty').value);
     const price = parseFloat(container.dataset.foodPrice);
 
     initiatePayment('/order/single', {
