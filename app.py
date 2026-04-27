@@ -78,16 +78,31 @@ razorpay_client = razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
 
 FIREBASE_CREDENTIALS_PATH = os.getenv("FIREBASE_CREDENTIALS_PATH", "myserviceAccountKey.json")
 FIREBASE_READY = False
-if os.path.isfile(FIREBASE_CREDENTIALS_PATH):
+
+# Try 1: Load from environment variable (Railway deployment)
+_fb_json_str = os.getenv("FIREBASE_CREDENTIALS_JSON")
+if _fb_json_str:
+    try:
+        _fb_cred = credentials.Certificate(json.loads(_fb_json_str))
+        firebase_admin.initialize_app(_fb_cred)
+        FIREBASE_READY = True
+        logger.info("Firebase initialized from FIREBASE_CREDENTIALS_JSON env variable.")
+    except Exception as e:
+        logger.exception("Firebase Admin SDK failed to initialize from env variable: %s", e)
+
+# Try 2: Load from local file (local development)
+if not FIREBASE_READY and os.path.isfile(FIREBASE_CREDENTIALS_PATH):
     try:
         _fb_cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
         firebase_admin.initialize_app(_fb_cred)
         FIREBASE_READY = True
+        logger.info("Firebase initialized from file: %s", FIREBASE_CREDENTIALS_PATH)
     except Exception as e:
-        logger.exception("Firebase Admin SDK failed to initialize: %s", e)
-else:
+        logger.exception("Firebase Admin SDK failed to initialize from file: %s", e)
+
+if not FIREBASE_READY:
     logger.warning(
-        "Firebase credentials not found at FIREBASE_CREDENTIALS_PATH=%s — user login will fail until configured.",
+        "Firebase not initialized. Set FIREBASE_CREDENTIALS_JSON env var or place %s file.",
         FIREBASE_CREDENTIALS_PATH,
     )
 
