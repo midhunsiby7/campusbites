@@ -13,12 +13,16 @@
 </head>
 <body class="admin-body">
   <header class="admin-header">
-    <h1 class="admin-title">Admin Dashboard</h1>
+    <div class="admin-brand-wrap">
+      <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="admin-logo-img" />
+      <h1 class="admin-title">Admin Dashboard</h1>
+    </div>
     <nav class="admin-nav">
       <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
       <a href="{{ url_for('admin_todays_menu') }}" class="admin-nav-btn">Menu</a>
       <a href="{{ url_for('scan_qr') }}" class="admin-nav-btn">Scan QR</a>
       <a href="{{ url_for('admin_settings') }}" class="admin-nav-btn">Settings</a>
+      <button class="admin-nav-btn" onclick="openOfflineOrderPopup()">Offline Token</button>
       <button class="admin-nav-btn" onclick="openUncollectedTokensPopup()">Uncollected Tokens</button>
       <form action="{{ url_for('admin_logout') }}" method="POST" class="logout-form">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -273,6 +277,119 @@
         });
       })
       .catch(() => Swal.fire('Error', 'Could not load uncollected tokens.', 'error'));
+  }
+
+  async function openOfflineOrderPopup() {
+    try {
+      const res = await fetch('/admin/offline-menu-items');
+      if (!res.ok) throw new Error('Network response was not ok');
+      const items = await res.json();
+      if (!items.length) {
+        return Swal.fire('No Items', 'No items available with stock right now.', 'info');
+      }
+
+      let cart = {}; // food_id -> qty
+      
+      window.offlineUpdateQty = function(id, delta, maxStock, price) {
+        const current = cart[id] || 0;
+        const next = current + delta;
+        if (next < 0 || next > maxStock) return;
+        cart[id] = next;
+        document.getElementById(`qty-${id}`).innerText = next;
+        
+        let total = 0;
+        items.forEach(item => {
+           total += (cart[item.food_id] || 0) * item.price;
+        });
+        document.getElementById('offline-total').innerText = total.toFixed(2);
+      };
+
+      let html = `<div class="offline-items-container" style="max-height: 400px; overflow-y: auto; text-align: left; padding-right: 10px;">`;
+      items.forEach(item => {
+        html += `
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding: 12px 0;">
+            <div style="flex: 1; padding-right: 10px;">
+              <strong style="color: var(--text); font-size: 1rem;">${item.name}</strong><br>
+              <small style="color: var(--text-muted);">₹${item.price.toFixed(2)} | Stock: ${item.stock}</small>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px; background: var(--surface-2); border-radius: 8px; padding: 4px; border: 1px solid var(--border);">
+              <button type="button" style="background: none; border: none; color: var(--text); width: 28px; height: 28px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; border-radius: 6px;" onclick="window.offlineUpdateQty(${item.food_id}, -1, ${item.stock}, ${item.price})">−</button>
+              <span id="qty-${item.food_id}" style="min-width: 24px; text-align: center; color: var(--text); font-weight: bold;">0</span>
+              <button type="button" style="background: none; border: none; color: var(--text); width: 28px; height: 28px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; border-radius: 6px;" onclick="window.offlineUpdateQty(${item.food_id}, 1, ${item.stock}, ${item.price})">+</button>
+            </div>
+          </div>
+        `;
+      });
+      html += `</div>`;
+      html += `<div style="text-align: right; margin-top: 15px; font-size: 1.2rem; font-weight: bold; color: var(--text);">Total: ₹<span id="offline-total">0.00</span></div>`;
+
+      Swal.fire({
+        title: 'Generate Offline Token',
+        html: html,
+        showCancelButton: true,
+        confirmButtonText: 'Generate Token',
+        confirmButtonColor: '#2563eb',
+        background: 'var(--surface)',
+        color: 'var(--text)',
+        width: '500px',
+        preConfirm: async () => {
+          const selected = [];
+          for (const [id, qty] of Object.entries(cart)) {
+            if (qty > 0) {
+              selected.push({ food_id: parseInt(id), quantity: qty });
+            }
+          }
+          if (selected.length === 0) {
+            Swal.showValidationMessage('Please select at least one item');
+            return false;
+          }
+
+          try {
+            const resp = await fetch('/admin/offline-order', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': CSRF_TOKEN 
+              },
+              body: JSON.stringify({ 
+                items: selected,
+                csrf_token: CSRF_TOKEN
+              })
+            });
+            const data = await resp.json();
+            if (!data.success) {
+              Swal.showValidationMessage(data.error || 'Failed to create order');
+              return false;
+            }
+            return data;
+          } catch(err) {
+            Swal.showValidationMessage('Network error');
+            return false;
+          }
+        }
+      }).then((result) => {
+        if (result.isConfirmed && result.value) {
+          Swal.fire({
+            title: 'Token Generated!',
+            html: `
+              <h1 style="font-size: 5rem; color: var(--primary); margin: 20px 0; font-weight: 900; line-height: 1;">${result.value.token_number}</h1>
+              <p style="font-size: 1.1rem; color: var(--text-muted);">Please collect ₹${result.value.total.toFixed(2)}</p>
+            `,
+            icon: 'success',
+            background: 'var(--surface)',
+            color: 'var(--text)',
+            confirmButtonColor: '#2563eb',
+            confirmButtonText: 'Done'
+          }).then(() => {
+            liveUpdateDashboard();
+          });
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+      Swal.fire('Error', 'Could not load menu items.', 'error');
+    }
   }
   </script>
 

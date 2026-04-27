@@ -11,7 +11,10 @@
 <body class="home-body has-bottom-nav">
 
   <header class="admin-header">
-    <h1>Manage Foods</h1>
+    <div class="admin-brand-wrap">
+      <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="admin-logo-img" />
+      <h1 class="admin-title">Manage Foods</h1>
+    </div>
     <nav>
       <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
       <a href="/admin/add-food">Add Food</a>

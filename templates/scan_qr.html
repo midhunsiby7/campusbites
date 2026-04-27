@@ -13,7 +13,10 @@
 </head>
 <body class="admin-body">
   <header class="admin-header">
-    <h1>Scan QR</h1>
+    <div class="admin-brand-wrap">
+      <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="admin-logo-img" />
+      <h1 class="admin-title">Scan QR</h1>
+    </div>
     <nav>
       <a href="{{ url_for('admin_dashboard') }}">Dashboard</a>
       <a href="{{ url_for('admin_foods') }}">Manage Foods</a>

@@ -55,7 +55,7 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=_IS_PRODUCTION,
     PERMANENT_SESSION_LIFETIME=timedelta(days=7),
-    MAX_CONTENT_LENGTH=5 * 1024 * 1024,  # 5MB max file size
+    MAX_CONTENT_LENGTH=20 * 1024 * 1024,  # 20MB max file size
 )
 
 _db_port_raw = os.getenv("DB_PORT", "3306")
@@ -425,7 +425,7 @@ def process_and_save_image(file, food_name):
 
     try:
         image = Image.open(file)
-        TARGET_SIZE = (200, 200) 
+        TARGET_SIZE = (600, 600) 
         original_width, original_height = image.size
         target_aspect = TARGET_SIZE[0] / TARGET_SIZE[1]
         original_aspect = original_width / original_height
@@ -455,10 +455,54 @@ def process_and_save_image(file, food_name):
 # --- TOKEN GENERATION AND CLEANUP LOGIC ---
 
 _CHECKOUT_TOKEN_HOLDS_TABLE_OK = False
+_ORDER_TYPE_COLUMN_OK = False
 CHECKOUT_USER_LOCK_TIMEOUT = 15
 TOKEN_ALLOC_LOCK_TIMEOUT = 25
 _CHECKOUT_USER_LOCK_PREFIX = "cb_co_u"
 _TOKEN_ALLOC_LOCK_NAME = "cb_token_alloc"
+
+
+def _ensure_order_type_column():
+    """Add order_type column to orders table if it doesn't exist."""
+    global _ORDER_TYPE_COLUMN_OK
+    if _ORDER_TYPE_COLUMN_OK:
+        return
+    conn = mysql.connector.connect(**DB_CONFIG)
+    try:
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SHOW COLUMNS FROM orders LIKE 'order_type'")
+        if not cur.fetchone():
+            cur.execute("""
+                ALTER TABLE orders
+                ADD COLUMN order_type VARCHAR(10) NOT NULL DEFAULT 'online'
+            """)
+            conn.commit()
+            print("[MIGRATION] Added order_type column to orders table.")
+        _ORDER_TYPE_COLUMN_OK = True
+    except Exception as e:
+        print(f"[MIGRATION] order_type column check error: {e}")
+        _ORDER_TYPE_COLUMN_OK = True  # Don't retry on error
+    finally:
+        conn.close()
+
+
+def _get_or_create_walkin_user():
+    """Get or create a special 'Walk-in' user for offline orders. Returns user_id."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    try:
+        cur = conn.cursor(dictionary=True, buffered=True)
+        cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", ('walkin@campusbites.local',))
+        row = cur.fetchone()
+        if row:
+            return row['id']
+        cur.execute("""
+            INSERT INTO users (email, name, phone, role)
+            VALUES (%s, %s, %s, %s)
+        """, ('walkin@campusbites.local', 'Walk-in Customer', '0000000000', 'student'))
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
 
 
 def _ensure_checkout_token_holds_table():
@@ -497,22 +541,44 @@ def _mysql_named_lock_release(cursor, name: str) -> None:
     cursor.execute("SELECT RELEASE_LOCK(%s) AS rlk", (name,))
     cursor.fetchone()
 
-
-def _next_global_display_token(cursor):
+def _next_random_online_token(cursor):
     """
-    Smallest positive integer not used in orders, uncollected_tokens, or active checkout holds.
-    orders.token_number is globally UNIQUE in this schema.
+    Generate a unique 4-digit random token (1000-9999) for online orders.
+    Ensures no collision with today's orders, uncollected_tokens, or active checkout holds.
     """
-    cursor.execute("SELECT token_number FROM orders")
+    today = datetime.now(IST).date()
+    cursor.execute("SELECT token_number FROM orders WHERE DATE(created_at) = %s AND order_type = 'online'", (today,))
     used = {row["token_number"] for row in cursor.fetchall()}
     cursor.execute("SELECT token_number FROM uncollected_tokens")
     used |= {row["token_number"] for row in cursor.fetchall()}
     cursor.execute("SELECT token_number FROM checkout_token_holds")
     used |= {row["token_number"] for row in cursor.fetchall()}
-    n = 1
-    while n in used:
-        n += 1
-    return n
+
+    # Generate a random 4-digit number not in the used set
+    attempts = 0
+    while attempts < 9000:  # max possible unique values in 1000-9999
+        token = random.randint(1000, 9999)
+        if token not in used:
+            return token
+        attempts += 1
+
+    # Fallback: should never happen for a campus canteen
+    raise RuntimeError("Could not generate unique online token — all 4-digit numbers are used today.")
+
+
+def _next_offline_sequential_token(cursor):
+    """
+    Next sequential token for offline/walk-in orders. Resets to 1 each day.
+    Only looks at today's offline orders.
+    """
+    today = datetime.now(IST).date()
+    cursor.execute("""
+        SELECT MAX(token_number) AS max_token FROM orders
+        WHERE DATE(created_at) = %s AND order_type = 'offline'
+    """, (today,))
+    row = cursor.fetchone()
+    max_token = row['max_token'] if row and row['max_token'] else 0
+    return max_token + 1
 
 
 def _daily_cleanup_and_reset_at_startup():
@@ -562,7 +628,9 @@ def _daily_cleanup_and_reset_at_startup():
                     ),
                 )
 
-                if order['status'] in ['pending', 'confirmed']:
+                # Skip offline orders for uncollected tokens (sequential tokens reset daily)
+                is_offline = order.get('order_type', 'online') == 'offline'
+                if order['status'] in ['pending', 'confirmed'] and not is_offline:
                     startup_cursor.execute(
                         """
                         INSERT IGNORE INTO uncollected_tokens (token_number, order_id, order_date, reason)
@@ -670,7 +738,8 @@ def check_login():
         "role": role
     })
 
-import hashlib  # if you're using hashlib for hashing
+import hashlib
+import random  # if you're using hashlib for hashing
 
 # Load Firebase public config from file
 @app.route("/firebase-config")
@@ -802,7 +871,8 @@ def admin_dashboard():
     query = """
     SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
            users.name AS user_name, orders.created_at, orders.total,
-           fi.image AS food_image, fi.name AS food_name
+           fi.image AS food_image, fi.name AS food_name,
+           item_counts.total_items
     FROM orders
     JOIN users ON orders.user_id = users.id
     LEFT JOIN (
@@ -812,8 +882,13 @@ def admin_dashboard():
     ) first_oi ON first_oi.order_id = orders.id
     LEFT JOIN order_items oi ON oi.id = first_oi.first_item_id
     LEFT JOIN food_items fi ON fi.id = oi.food_id
+    LEFT JOIN (
+        SELECT order_id, COUNT(*) as total_items
+        FROM order_items
+        GROUP BY order_id
+    ) item_counts ON item_counts.order_id = orders.id
     WHERE DATE(orders.created_at) = %s
-"""
+    """
 
     params = [datetime.now(IST).date()]
 
@@ -845,6 +920,11 @@ def admin_dashboard():
                 order['time_ago'] = f"{secs // 3600}h ago"
         else:
             order['time_ago'] = "N/A"
+            
+        food_name = order.get('food_name') or 'Item'
+        total_items = order.get('total_items', 1)
+        if total_items and total_items > 1:
+            order['food_name'] = f"{food_name} + {total_items - 1} more"
 
     return render_template('admin_dashboard.html',
                            orders=orders,
@@ -1424,6 +1504,137 @@ def live_stock():
     return jsonify({str(row['food_id']): row['stock'] for row in stock_data})
 
 
+@app.route('/admin/offline-menu-items')
+@admin_required
+def offline_menu_items():
+    """Return today's menu items with stock > 0 for the offline order popup."""
+    conn, cursor = get_db_connection()
+    today = today_ist_date()
+    cursor.execute("""
+        SELECT fi.id AS food_id, fi.name, fi.price, fi.image, fi.category, dm.stock
+        FROM food_items fi
+        JOIN daily_menu dm ON fi.id = dm.food_id
+        WHERE DATE(dm.available_date) = %s
+          AND dm.stock > 0
+          AND fi.available = 1
+        ORDER BY fi.category, fi.name
+    """, (today,))
+    items = cursor.fetchall()
+    result = []
+    for item in items:
+        result.append({
+            'food_id': item['food_id'],
+            'name': item['name'],
+            'price': float(item['price']),
+            'image': item['image'],
+            'category': item['category'],
+            'stock': item['stock'],
+        })
+    return jsonify(result)
+
+
+@app.route('/admin/offline-order', methods=['POST'])
+@admin_required
+def create_offline_order():
+    """Create an offline walk-in order. Deducts stock and generates a sequential token."""
+    _ensure_order_type_column()
+    data = request.get_json()
+    if not data or not data.get('items'):
+        return jsonify({'success': False, 'error': 'No items provided.'}), 400
+
+    items = data['items']
+    # Validate items
+    for item in items:
+        if not item.get('food_id') or not item.get('quantity') or int(item['quantity']) < 1:
+            return jsonify({'success': False, 'error': 'Invalid item data.'}), 400
+
+    conn, cursor = get_db_connection()
+    today = today_ist_date()
+
+    try:
+        conn.start_transaction()
+
+        total = 0.0
+        validated_items = []
+
+        for item in items:
+            fid = int(item['food_id'])
+            qty = int(item['quantity'])
+
+            # Lock and validate stock
+            cursor.execute("""
+                SELECT dm.stock, fi.price, fi.name
+                FROM daily_menu dm
+                JOIN food_items fi ON fi.id = dm.food_id
+                WHERE dm.food_id = %s AND DATE(dm.available_date) = %s
+                FOR UPDATE
+            """, (fid, today))
+            row = cursor.fetchone()
+
+            if not row:
+                conn.rollback()
+                return jsonify({'success': False, 'error': f'Item not on today\'s menu.'}), 400
+
+            if row['stock'] < qty:
+                conn.rollback()
+                return jsonify({'success': False, 'error': f'{row["name"]} - only {row["stock"]} left in stock.'}), 400
+
+            price = float(row['price'])
+            total += price * qty
+            validated_items.append({
+                'food_id': fid,
+                'quantity': qty,
+                'price': price,
+                'name': row['name'],
+            })
+
+        # Get or create walk-in user
+        walkin_user_id = _get_or_create_walkin_user()
+
+        # Generate next sequential offline token
+        token = _next_offline_sequential_token(cursor)
+
+        # Create the order
+        cursor.execute("""
+            INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, order_type)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (walkin_user_id, total, token, 'cash', 'paid', 'confirmed', 'offline'))
+        order_id = cursor.lastrowid
+
+        # Insert order items and deduct stock
+        for vi in validated_items:
+            cursor.execute("""
+                INSERT INTO order_items (order_id, food_id, quantity, price)
+                VALUES (%s, %s, %s, %s)
+            """, (order_id, vi['food_id'], vi['quantity'], vi['price']))
+
+            # Deduct stock
+            cursor.execute("""
+                UPDATE daily_menu
+                SET stock = stock - %s,
+                    availability = CASE WHEN stock - %s <= 0 THEN 'not_available' ELSE availability END
+                WHERE food_id = %s AND DATE(available_date) = %s
+            """, (vi['quantity'], vi['quantity'], vi['food_id'], today))
+
+        conn.commit()
+
+        return jsonify({
+            'success': True,
+            'token_number': token,
+            'total': total,
+            'order_id': order_id,
+            'items': [{'name': vi['name'], 'qty': vi['quantity'], 'price': vi['price']} for vi in validated_items],
+        })
+
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print(f"Error creating offline order: {e}")
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': 'Could not create offline order.'}), 500
+
 
 @app.route('/home')
 @login_required
@@ -1589,6 +1800,7 @@ def order_single():
         conn.commit()
 
         _ensure_checkout_token_holds_table()
+        _ensure_order_type_column()
         lock_user = f"{_CHECKOUT_USER_LOCK_PREFIX}{user_id}"
         if not _mysql_named_lock_acquire(cursor, lock_user, CHECKOUT_USER_LOCK_TIMEOUT):
             return jsonify({
@@ -1607,7 +1819,7 @@ def order_single():
         alloc_lock_held = True
 
         try:
-            token = _next_global_display_token(cursor)
+            token = _next_random_online_token(cursor)
             notes = {
                 "user_id": str(user_id),
                 "food_id": str(food_id),
@@ -1684,6 +1896,7 @@ def order_all_from_cart():
 
     try:
         _ensure_checkout_token_holds_table()
+        _ensure_order_type_column()
         release_expired_reservations(cursor, conn)
 
         # Fetch cart items with food info
@@ -1699,7 +1912,7 @@ def order_all_from_cart():
             return jsonify({'success': False, 'error': 'Cart is empty'}), 400
 
         # Lock and validate stock for each item atomically (prevents race conditions)
-        conn.start_transaction()
+        # Implicit transaction is already running from the SELECT query above
         today = date.today()
         current_time = datetime.now().time()
         for item in items:
@@ -1747,7 +1960,7 @@ def order_all_from_cart():
         alloc_lock_held = True
 
         try:
-            token = _next_global_display_token(cursor)
+            token = _next_random_online_token(cursor)
 
             notes = {
                 "user_id": str(user_id),
@@ -1957,9 +2170,9 @@ def payment_webhook():
                 return 'Already processed', 200
 
             cursor.execute("""
-                INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, razorpay_order_id, razorpay_payment_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (user_id, expected_total, token_number, 'razorpay', 'paid', 'confirmed', razorpay_order_id, razorpay_payment_id))
+                INSERT INTO orders (user_id, total, token_number, payment_method, payment_status, status, razorpay_order_id, razorpay_payment_id, order_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (user_id, expected_total, token_number, 'razorpay', 'paid', 'confirmed', razorpay_order_id, razorpay_payment_id, 'online'))
             order_id = cursor.lastrowid
 
             # For each item: lock row, validate, update stock/availability, insert order_items
@@ -2298,7 +2511,7 @@ def handle_db_error(error):
 
 @app.errorhandler(413)
 def request_entity_too_large(error):
-    return jsonify({'error': 'File too large. Max 5MB allowed.'}), 413
+    return jsonify({'error': 'File too large. Max 20MB allowed.'}), 413
 
 @app.errorhandler(429)
 def ratelimit_handler(e):
@@ -2330,7 +2543,8 @@ def api_admin_orders():
     query = """
         SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
                users.name AS user_name, orders.created_at, orders.total,
-               fi.image AS food_image, fi.name AS food_name
+               fi.image AS food_image, fi.name AS food_name,
+               item_counts.total_items
         FROM orders
         JOIN users ON orders.user_id = users.id
         LEFT JOIN (
@@ -2340,6 +2554,11 @@ def api_admin_orders():
         ) first_oi ON first_oi.order_id = orders.id
         LEFT JOIN order_items oi ON oi.id = first_oi.first_item_id
         LEFT JOIN food_items fi ON fi.id = oi.food_id
+        LEFT JOIN (
+            SELECT order_id, COUNT(*) as total_items
+            FROM order_items
+            GROUP BY order_id
+        ) item_counts ON item_counts.order_id = orders.id
         WHERE DATE(orders.created_at) = %s
     """
     params = [datetime.now(IST).date()]
@@ -2363,6 +2582,11 @@ def api_admin_orders():
         else:
             time_ago = f"{secs // 3600}h ago"
 
+        food_name = order.get('food_name') or 'Item'
+        total_items = order.get('total_items', 1)
+        if total_items and total_items > 1:
+            food_name = f"{food_name} + {total_items - 1} more"
+
         result.append({
             'id': order['id'],
             'token_number': order['token_number'],
@@ -2370,7 +2594,7 @@ def api_admin_orders():
             'payment_status': order['payment_status'],
             'user_name': order['user_name'],
             'food_image': order.get('food_image'),
-            'food_name': order.get('food_name') or 'Item',
+            'food_name': food_name,
             'total': float(order['total']),
             'created_at': order['created_at'].strftime('%d %b, %I:%M %p'),
             'time_ago': time_ago,

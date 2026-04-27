@@ -1,10 +1,25 @@
+# ─── Secrets & credentials ───
 .env
 myserviceAccountKey.json
+
+# ─── Python bytecode ───
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+
+# ─── Virtual environments ───
 env/
 venv/
 .venv/
+
+# ─── Runtime state files ───
+.last_cleanup_date
+.lastautosetdate
+
+# ─── IDE / Editor settings ───
+.vscode/
+
+# ─── Ngrok binary ───
+ngrok/

@@ -10,7 +10,10 @@
 </head>
 <body class="admin-body admin-settings-page">
   <header class="admin-header">
-    <h1 class="admin-title">Admin Settings</h1>
+    <div class="admin-brand-wrap">
+      <img src="{{ url_for('static', filename='images/logo.png') }}" alt="Logo" class="admin-logo-img" />
+      <h1 class="admin-title">Admin Settings</h1>
+    </div>
     <nav class="admin-nav">
       <a href="{{ url_for('admin_dashboard') }}" class="admin-nav-btn">Dashboard</a>
       <a href="{{ url_for('admin_foods') }}" class="admin-nav-btn">Manage Foods</a>
@@ -27,6 +30,12 @@
       <div id="theme-toggle-root"></div>
       <p>Signed in as <strong>{{ admin_username }}</strong></p>
       <p>Use the switch above to toggle light or dark theme.</p>
+      
+      <div class="developer-credits">
+        <p>Developed and maintained by</p>
+        <p><strong>BCA (2024 - 28) Computer Application</strong></p>
+        <p>BVM College Cherpunkal</p>
+      </div>
     </div>
   </main>
 </body>

@@ -1,10 +1,15 @@
 from werkzeug.security import generate_password_hash
 import mysql.connector
+import os
+from dotenv import load_dotenv
 
-DB_HOST = "127.0.0.1"
-DB_USER = "root"
-DB_PASSWORD = "8423"
-DB_NAME = "campusbites"
+load_dotenv()
+
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
+DB_NAME = os.getenv("DB_NAME", "campusbites")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
 
 def hash_password_for_admin(username, new_password):
     """Hashes a password and updates it in the database for a given admin username."""
@@ -15,7 +20,8 @@ def hash_password_for_admin(username, new_password):
             host=DB_HOST,
             user=DB_USER,
             password=DB_PASSWORD,
-            database=DB_NAME
+            database=DB_NAME,
+            port=DB_PORT
         )
         cursor = conn.cursor()
         
