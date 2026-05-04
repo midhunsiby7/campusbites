@@ -60,6 +60,21 @@
 
         <button type="submit" class="btn btn-primary" id="save-times-btn">Save Times</button>
       </form>
+
+      {% if menu_overridden %}
+      <div style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(251, 191, 36, 0.15); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 10px; color: var(--text);">
+        <p style="margin: 0; font-weight: 600; font-size: 0.9rem;">⚠️ Today's menu uses manually set times:</p>
+        <ul style="margin: 0.4rem 0 0 1.2rem; padding: 0; font-size: 0.85rem; color: var(--text-muted);">
+          {% if today_actual_times.breakfast %}
+          <li>Breakfast: {{ today_actual_times.breakfast.start }} – {{ today_actual_times.breakfast.end }}</li>
+          {% endif %}
+          {% if today_actual_times.lunch %}
+          <li>Lunch: {{ today_actual_times.lunch.start }} – {{ today_actual_times.lunch.end }}</li>
+          {% endif %}
+        </ul>
+        <p style="margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--text-muted);">The defaults above will apply to future auto-set menus, not today's.</p>
+      </div>
+      {% endif %}
     </div>
 
     <div class="form-container" style="margin-top: 1.5rem;">

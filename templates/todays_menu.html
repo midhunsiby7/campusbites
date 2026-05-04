@@ -144,9 +144,10 @@
         <div class="food-selection-grid">
           {% for food in foods if food.category == 'breakfast' %}
           <div class="food-check-item">
-            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}">
+            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}"
+              {% if today_day_key in (food.days or '') %}checked{% endif %}>
             <label for="food_{{ food.id }}">{{ food.name }}</label>
-            <input type="number" name="stock_{{ food.id }}" value="10" min="1">
+            <input type="number" name="stock_{{ food.id }}" value="{{ food.default_stock or 10 }}" min="1">
           </div>
           {% endfor %}
         </div>
@@ -155,9 +156,10 @@
         <div class="food-selection-grid">
           {% for food in foods if food.category == 'lunch' %}
           <div class="food-check-item">
-            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}">
+            <input type="checkbox" name="food_ids" value="{{ food.id }}" id="food_{{ food.id }}"
+              {% if today_day_key in (food.days or '') %}checked{% endif %}>
             <label for="food_{{ food.id }}">{{ food.name }}</label>
-            <input type="number" name="stock_{{ food.id }}" value="10" min="1">
+            <input type="number" name="stock_{{ food.id }}" value="{{ food.default_stock or 10 }}" min="1">
           </div>
           {% endfor %}
         </div>

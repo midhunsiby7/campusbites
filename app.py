@@ -321,10 +321,8 @@ def auto_set_menu_for_date(target_date: date):
         existing = {row['food_id'] for row in cursor.fetchall()}
 
         inserted = 0
+        updated = 0
         for f in foods:
-            if f['food_id'] in existing:
-                continue  # ✅ skip if already present (don't touch stock/times)
-
             if f['category'] == 'breakfast':
                 s_time = bf_start
                 e_time = bf_end
@@ -332,14 +330,23 @@ def auto_set_menu_for_date(target_date: date):
                 s_time = lu_start
                 e_time = lu_end
 
-            cursor.execute("""
-                INSERT INTO daily_menu (food_id, available_date, category, start_time, end_time, stock)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (f['food_id'], target_date, f['category'], s_time, e_time, f['d_stock']))
-            inserted += 1
+            if f['food_id'] in existing:
+                # Update times for existing items (keep stock untouched)
+                cursor.execute("""
+                    UPDATE daily_menu
+                    SET start_time=%s, end_time=%s
+                    WHERE food_id=%s AND available_date=%s
+                """, (s_time, e_time, f['food_id'], target_date))
+                updated += 1
+            else:
+                cursor.execute("""
+                    INSERT INTO daily_menu (food_id, available_date, category, start_time, end_time, stock)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                """, (f['food_id'], target_date, f['category'], s_time, e_time, f['d_stock']))
+                inserted += 1
 
         conn.commit()
-        print(f"[AUTO-MENU] Auto-set for {target_date}: inserted {inserted} new items (kept existing stock).")
+        print(f"[AUTO-MENU] Auto-set for {target_date}: inserted {inserted} new, updated {updated} existing (times synced, stock kept).")
 
     except Exception as e:
         if conn and getattr(conn, 'is_connected', lambda: False)():
@@ -1268,6 +1275,9 @@ def admin_todays_menu():
     default_lunch_start     = _fmt(default_lunch_start)
     default_lunch_end       = _fmt(default_lunch_end)
 
+    # Compute today's day key for pre-checking foods
+    today_day_key = ['mon','tue','wed','thu','fri','sat','sun'][today.weekday()]
+
     return render_template(
         "todays_menu.html",
         today_menu=today_menu,
@@ -1278,7 +1288,8 @@ def admin_todays_menu():
         default_breakfast_start=default_breakfast_start,
         default_breakfast_end=default_breakfast_end,
         default_lunch_start=default_lunch_start,
-        default_lunch_end=default_lunch_end
+        default_lunch_end=default_lunch_end,
+        today_day_key=today_day_key
     )
 
 
@@ -2500,9 +2511,33 @@ def admin_settings():
         'lunch_end':       _fmt_time(lu.get('default_end'),   '23:00'),
     }
 
+    # Check if today's menu has different times (manual override)
+    today = today_ist_date()
+    cursor.execute("""
+        SELECT category, start_time, end_time FROM daily_menu
+        WHERE DATE(available_date) = %s
+        GROUP BY category, start_time, end_time
+    """, (today,))
+    today_times = {row['category']: row for row in cursor.fetchall()}
+
+    menu_overridden = False
+    today_actual_times = {}
+    if today_times:
+        for cat in ['breakfast', 'lunch']:
+            if cat in today_times:
+                actual_start = _fmt_time(today_times[cat]['start_time'])
+                actual_end   = _fmt_time(today_times[cat]['end_time'])
+                today_actual_times[cat] = {'start': actual_start, 'end': actual_end}
+                default_start = menu_defaults.get(f'{cat}_start')
+                default_end   = menu_defaults.get(f'{cat}_end')
+                if actual_start != default_start or actual_end != default_end:
+                    menu_overridden = True
+
     return render_template('admin_settings.html',
                            admin_username=session.get('admin_username', 'Admin'),
-                           menu_defaults=menu_defaults)
+                           menu_defaults=menu_defaults,
+                           menu_overridden=menu_overridden,
+                           today_actual_times=today_actual_times)
 
 @app.route('/logout', methods=['POST'])
 @login_required
