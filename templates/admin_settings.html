@@ -6,6 +6,7 @@
   <title>Admin Settings - CAMPUSBITES</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260410c">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=20260410c">
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <script src="{{ url_for('static', filename='js/theme.js') }}"></script>
 </head>
 <body class="admin-body admin-settings-page">
@@ -30,7 +31,38 @@
       <div id="theme-toggle-root"></div>
       <p>Signed in as <strong>{{ admin_username }}</strong></p>
       <p>Use the switch above to toggle light or dark theme.</p>
-      
+    </div>
+
+    <div class="form-container" style="margin-top: 1.5rem;">
+      <h2>Default Menu Times</h2>
+      <p style="color: var(--text-muted); margin-bottom: 1rem;">These times are used when auto-menu runs or when setting today's menu.</p>
+      <form method="POST" action="{{ url_for('admin_settings') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="time-inputs" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+          <div>
+            <label style="font-weight: 600; margin-bottom: 0.25rem; display: block;">Breakfast Start</label>
+            <input type="time" name="breakfast_default_start" value="{{ menu_defaults.breakfast_start }}" style="width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);">
+          </div>
+          <div>
+            <label style="font-weight: 600; margin-bottom: 0.25rem; display: block;">Breakfast End</label>
+            <input type="time" name="breakfast_default_end" value="{{ menu_defaults.breakfast_end }}" style="width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);">
+          </div>
+          <div>
+            <label style="font-weight: 600; margin-bottom: 0.25rem; display: block;">Lunch Start</label>
+            <input type="time" name="lunch_default_start" value="{{ menu_defaults.lunch_start }}" style="width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);">
+          </div>
+          <div>
+            <label style="font-weight: 600; margin-bottom: 0.25rem; display: block;">Lunch End</label>
+            <input type="time" name="lunch_default_end" value="{{ menu_defaults.lunch_end }}" style="width: 100%; padding: 0.5rem; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text);">
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="save-times-btn">Save Times</button>
+      </form>
+    </div>
+
+    <div class="form-container" style="margin-top: 1.5rem;">
       <div class="developer-credits">
         <p>Developed and maintained by</p>
         <p><strong>BCA (2024 - 28) Computer Application</strong></p>
@@ -38,5 +70,28 @@
       </div>
     </div>
   </main>
+
+  <script>
+    const form = document.querySelector('form[action*="settings"]');
+    if (form) {
+      form.addEventListener('submit', function(e) {
+        const btn = document.getElementById('save-times-btn');
+        if (btn) btn.textContent = 'Saving...';
+      });
+    }
+
+    // Show success toast if redirected after save
+    {% if request.args.get('saved') %}
+    Swal.fire({
+      toast: true,
+      position: 'top-end',
+      icon: 'success',
+      title: 'Default times saved!',
+      showConfirmButton: false,
+      timer: 2000,
+      timerProgressBar: true
+    });
+    {% endif %}
+  </script>
 </body>
 </html>

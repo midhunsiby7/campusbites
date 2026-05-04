@@ -297,20 +297,26 @@ def auto_set_menu_for_date(target_date: date):
         # 1) Cleanup rows older than target_date
         cursor.execute("DELETE FROM daily_menu WHERE available_date < %s", (target_date,))
 
-        # 2) Build day key and fetch foods for that day
+        # 2) Fetch default times from menu_time_defaults table
+        cursor.execute("SELECT category, default_start, default_end FROM menu_time_defaults")
+        time_defaults = {row['category']: row for row in cursor.fetchall()}
+        bf_start = time_defaults.get('breakfast', {}).get('default_start') or '08:00:00'
+        bf_end   = time_defaults.get('breakfast', {}).get('default_end')   or '23:00:00'
+        lu_start = time_defaults.get('lunch', {}).get('default_start')     or '12:00:00'
+        lu_end   = time_defaults.get('lunch', {}).get('default_end')       or '23:00:00'
+
+        # 3) Build day key and fetch foods for that day
         day_key = ['mon','tue','wed','thu','fri','sat','sun'][target_date.weekday()]
         cursor.execute("""
             SELECT id AS food_id, category,
-                   COALESCE(default_stock, 10) AS d_stock,
-                   default_breakfast_start, default_breakfast_end,
-                   default_lunch_start, default_lunch_end, days
+                   COALESCE(default_stock, 10) AS d_stock, days
             FROM food_items
             WHERE available = 1
               AND (days IS NULL OR TRIM(days) = '' OR FIND_IN_SET(%s, days) > 0)
         """, (day_key,))
         foods = cursor.fetchall()
 
-        # 3) Fetch already present food_ids for today
+        # 4) Fetch already present food_ids for today
         cursor.execute("SELECT food_id FROM daily_menu WHERE available_date = %s", (target_date,))
         existing = {row['food_id'] for row in cursor.fetchall()}
 
@@ -320,11 +326,11 @@ def auto_set_menu_for_date(target_date: date):
                 continue  # ✅ skip if already present (don't touch stock/times)
 
             if f['category'] == 'breakfast':
-                s_time = f['default_breakfast_start'] or '08:00:00'
-                e_time = f['default_breakfast_end']   or '11:00:00'
+                s_time = bf_start
+                e_time = bf_end
             else:
-                s_time = f['default_lunch_start'] or '12:00:00'
-                e_time = f['default_lunch_end']   or '15:00:00'
+                s_time = lu_start
+                e_time = lu_end
 
             cursor.execute("""
                 INSERT INTO daily_menu (food_id, available_date, category, start_time, end_time, stock)
@@ -1001,20 +1007,6 @@ def add_food():
         # Default stock
         default_stock = int(request.form.get('default_stock', 10))
 
-        # Per-category default times (admin may set both or only relevant set)
-        db_default_breakfast_start = request.form.get('default_breakfast_start') or None
-        db_default_breakfast_end   = request.form.get('default_breakfast_end') or None
-        db_default_lunch_start     = request.form.get('default_lunch_start') or None
-        db_default_lunch_end       = request.form.get('default_lunch_end') or None
-
-        # For backward compatibility, set legacy default_start_time / end_time to the chosen cat's values
-        if category == 'breakfast':
-            legacy_start = db_default_breakfast_start or request.form.get('default_start_time') or '08:00:00'
-            legacy_end   = db_default_breakfast_end   or request.form.get('default_end_time') or '11:00:00'
-        else:
-            legacy_start = db_default_lunch_start or request.form.get('default_start_time') or '12:00:00'
-            legacy_end   = db_default_lunch_end   or request.form.get('default_end_time') or '15:00:00'
-
         # Image handling (optional)
         image = request.files.get('image')
         image_url = None
@@ -1027,9 +1019,8 @@ def add_food():
         cursor.execute("""
             INSERT INTO food_items
             (name, price, image, image_url, meal_type, stock, about, category, available,
-             days, default_start_time, default_end_time, default_stock,
-             default_breakfast_start, default_breakfast_end, default_lunch_start, default_lunch_end)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+             days, default_stock)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             name,
             price,
@@ -1041,13 +1032,7 @@ def add_food():
             category,              # category
             1,                     # available
             days_str,
-            legacy_start,
-            legacy_end,
-            default_stock,
-            db_default_breakfast_start,
-            db_default_breakfast_end,
-            db_default_lunch_start,
-            db_default_lunch_end
+            default_stock
         ))
         conn.commit()
         return redirect('/admin/add-food')
@@ -1081,20 +1066,6 @@ def edit_food(food_id):
 
         default_stock = int(request.form.get('default_stock', 10))
 
-        # Per-category times
-        db_default_breakfast_start = request.form.get('default_breakfast_start') or None
-        db_default_breakfast_end   = request.form.get('default_breakfast_end') or None
-        db_default_lunch_start     = request.form.get('default_lunch_start') or None
-        db_default_lunch_end       = request.form.get('default_lunch_end') or None
-
-        # Legacy defaults (for backward compat)
-        if category == 'breakfast':
-            legacy_start = db_default_breakfast_start or request.form.get('default_start_time') or '08:00:00'
-            legacy_end   = db_default_breakfast_end   or request.form.get('default_end_time') or '11:00:00'
-        else:
-            legacy_start = db_default_lunch_start or request.form.get('default_start_time') or '12:00:00'
-            legacy_end   = db_default_lunch_end   or request.form.get('default_end_time') or '15:00:00'
-
         # Image handling (optional)
         image = request.files.get('image')
         image_url = None
@@ -1106,34 +1077,22 @@ def edit_food(food_id):
             cursor.execute("""
                 UPDATE food_items
                 SET name=%s, price=%s, image_url=%s, category=%s, about=%s, available=%s, stock=%s,
-                    days=%s,
-                    default_start_time=%s, default_end_time=%s, default_stock=%s,
-                    default_breakfast_start=%s, default_breakfast_end=%s,
-                    default_lunch_start=%s, default_lunch_end=%s
+                    days=%s, default_stock=%s
                 WHERE id=%s
             """, (
                 name, price, image_url, category, about, available, default_stock,
-                days_str,
-                legacy_start, legacy_end, default_stock,
-                db_default_breakfast_start, db_default_breakfast_end,
-                db_default_lunch_start, db_default_lunch_end,
+                days_str, default_stock,
                 food_id
             ))
         else:
             cursor.execute("""
                 UPDATE food_items
                 SET name=%s, price=%s, category=%s, about=%s, available=%s, stock=%s,
-                    days=%s,
-                    default_start_time=%s, default_end_time=%s, default_stock=%s,
-                    default_breakfast_start=%s, default_breakfast_end=%s,
-                    default_lunch_start=%s, default_lunch_end=%s
+                    days=%s, default_stock=%s
                 WHERE id=%s
             """, (
                 name, price, category, about, available, default_stock,
-                days_str,
-                legacy_start, legacy_end, default_stock,
-                db_default_breakfast_start, db_default_breakfast_end,
-                db_default_lunch_start, db_default_lunch_end,
+                days_str, default_stock,
                 food_id
             ))
 
@@ -1287,11 +1246,27 @@ def admin_todays_menu():
     all_foods = cursor.fetchall()
     foods_not_on_menu = [f for f in all_foods if f['id'] not in current_menu_food_ids]
 
-    # Default times
-    default_breakfast_start = "08:00"
-    default_breakfast_end   = "23:00"
-    default_lunch_start     = "12:00"
-    default_lunch_end       = "23:00"
+    # Fetch default times from DB
+    cursor.execute("SELECT category, default_start, default_end FROM menu_time_defaults")
+    time_defaults = {row['category']: row for row in cursor.fetchall()}
+    bf = time_defaults.get('breakfast', {})
+    lu = time_defaults.get('lunch', {})
+    default_breakfast_start = (bf.get('default_start') or timedelta(hours=8))
+    default_breakfast_end   = (bf.get('default_end')   or timedelta(hours=23))
+    default_lunch_start     = (lu.get('default_start') or timedelta(hours=12))
+    default_lunch_end       = (lu.get('default_end')   or timedelta(hours=23))
+    # Format as HH:MM for template
+    def _fmt(val):
+        if isinstance(val, timedelta):
+            total = int(val.total_seconds())
+            return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
+        if isinstance(val, time):
+            return val.strftime('%H:%M')
+        return str(val)[:5]
+    default_breakfast_start = _fmt(default_breakfast_start)
+    default_breakfast_end   = _fmt(default_breakfast_end)
+    default_lunch_start     = _fmt(default_lunch_start)
+    default_lunch_end       = _fmt(default_lunch_end)
 
     return render_template(
         "todays_menu.html",
@@ -2474,12 +2449,60 @@ def settings():
     return render_template('settings.html', user=user)
 
 
-@app.route('/admin/settings')
+@app.route('/admin/settings', methods=['GET', 'POST'])
 @admin_required
 def admin_settings():
     if not session.get('admin_logged_in'):
         return redirect('/admin/login')
-    return render_template('admin_settings.html', admin_username=session.get('admin_username', 'Admin'))
+
+    conn, cursor = get_db_connection()
+
+    if request.method == 'POST':
+        # Update menu time defaults
+        bf_start = request.form.get('breakfast_default_start', '08:00')
+        bf_end   = request.form.get('breakfast_default_end', '23:00')
+        lu_start = request.form.get('lunch_default_start', '12:00')
+        lu_end   = request.form.get('lunch_default_end', '23:00')
+
+        cursor.execute("""
+            INSERT INTO menu_time_defaults (category, default_start, default_end)
+            VALUES ('breakfast', %s, %s)
+            ON DUPLICATE KEY UPDATE default_start=%s, default_end=%s
+        """, (bf_start, bf_end, bf_start, bf_end))
+        cursor.execute("""
+            INSERT INTO menu_time_defaults (category, default_start, default_end)
+            VALUES ('lunch', %s, %s)
+            ON DUPLICATE KEY UPDATE default_start=%s, default_end=%s
+        """, (lu_start, lu_end, lu_start, lu_end))
+        conn.commit()
+        return redirect('/admin/settings')
+
+    # GET: Fetch current defaults
+    cursor.execute("SELECT category, default_start, default_end FROM menu_time_defaults")
+    time_defaults = {row['category']: row for row in cursor.fetchall()}
+    bf = time_defaults.get('breakfast', {})
+    lu = time_defaults.get('lunch', {})
+
+    def _fmt_time(val, fallback='00:00'):
+        if val is None:
+            return fallback
+        if isinstance(val, timedelta):
+            total = int(val.total_seconds())
+            return f"{total // 3600:02d}:{(total % 3600) // 60:02d}"
+        if isinstance(val, time):
+            return val.strftime('%H:%M')
+        return str(val)[:5]
+
+    menu_defaults = {
+        'breakfast_start': _fmt_time(bf.get('default_start'), '08:00'),
+        'breakfast_end':   _fmt_time(bf.get('default_end'),   '23:00'),
+        'lunch_start':     _fmt_time(lu.get('default_start'), '12:00'),
+        'lunch_end':       _fmt_time(lu.get('default_end'),   '23:00'),
+    }
+
+    return render_template('admin_settings.html',
+                           admin_username=session.get('admin_username', 'Admin'),
+                           menu_defaults=menu_defaults)
 
 @app.route('/logout', methods=['POST'])
 @login_required

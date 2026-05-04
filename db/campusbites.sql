@@ -148,13 +148,7 @@ CREATE TABLE `food_items` (
   `about` text,
   `category` enum('breakfast','lunch') DEFAULT 'breakfast',
   `days` set('mon','tue','wed','thu','fri','sat','sun') NOT NULL DEFAULT 'mon,tue,wed,thu,fri',
-  `default_start_time` time NOT NULL DEFAULT '09:00:00',
-  `default_end_time` time NOT NULL DEFAULT '16:00:00',
   `default_stock` int NOT NULL DEFAULT '0',
-  `default_breakfast_start` time DEFAULT '08:00:00',
-  `default_breakfast_end` time DEFAULT '11:00:00',
-  `default_lunch_start` time DEFAULT '12:00:00',
-  `default_lunch_end` time DEFAULT '15:00:00',
   `image_url` varchar(500) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=21 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -166,9 +160,37 @@ CREATE TABLE `food_items` (
 
 LOCK TABLES `food_items` WRITE;
 /*!40000 ALTER TABLE `food_items` DISABLE KEYS */;
-INSERT INTO `food_items` VALUES (3,'Chicken Biriyani',75.00,'chicken_biriyani_1753029774.webp','lunch',1,25,'i am a junk food','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,'08:00:00','23:00:00',NULL,'23:00:00',NULL),(4,'Veg Meals',50.00,'veg_meals_1753029797.webp','lunch',1,25,'i am a vegan broo....','lunch','mon,tue,wed,thu,fri,sun','05:07:00','23:00:00',25,'08:00:00','23:00:00','05:07:00','23:00:00',NULL),(5,'chappathii',12.00,'chappathii_1753029826.webp',NULL,1,10,'shbuybfyubwuy','lunch','sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00',NULL),(6,'bababa pufs',28.00,'bababa_pufs_1775905680.webp',NULL,1,25,'Hello there i am pufs ...','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(7,'Dosa',12.00,'dosa_1775905543.webp',NULL,1,25,'Dosa dosa dosa','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(8,'Idli sambar',59.00,'idli_sambar_1753701382.webp',NULL,1,25,'Vssjsnsbsb','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00','https://res.cloudinary.com/dixwor2nn/image/upload/v1777398901/idli_sambar_1777398900.webp'),(10,'porotta',12.00,'porotta_1753029901.webp',NULL,1,10,'ghhg','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',25,'08:00:00','23:00:00','08:00:00','23:00:00',NULL),(12,'berger',70.00,'berger.webp',NULL,1,10,'yummy','breakfast','mon,tue,wed,thu,fri,sat,sun','09:00:00','23:00:00',20,'08:00:00','23:00:00','08:00:00','23:00:00',NULL),(13,'kozhi tikka 65',500.00,'kozhi_tikka_65.webp',NULL,1,25,'i am yummyyyyy','lunch','mon,tue,wed,thu,fri,sat,sun','12:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(14,'Kaytha chakka',20.00,'kaytha_chakka.webp',NULL,1,25,'Very very tasty','lunch','mon,tue,wed,thu,fri,sat,sun','12:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(15,'keethuuuuu',1.00,'keethuuuuu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(16,'paruu',1.00,'paruu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','23:00:00',25,NULL,'23:00:00',NULL,'23:00:00',NULL),(17,'midhun',7.00,'midhun_1758195687.webp','breakfast',1,7,'helo there eat me.....i am yummy','breakfast','mon,tue,wed,thu,fri,sat,sun','08:00:00','22:58:00',7,NULL,'22:58:00','12:00:00','15:00:00',NULL),(18,'Cristiano',7.00,'cristiano_1775905755.webp','lunch',1,25,'Goat ?','lunch','mon,tue,wed,thu,fri,sat,sun','12:00:00','18:00:00',25,NULL,'11:00:00','12:00:00','18:00:00',NULL),(19,'chullikkamb',2.00,NULL,'breakfast',1,3,'yuckkkkk','breakfast','mon,tue,wed,thu,fri','08:00:00','11:00:00',3,'08:00:00','11:00:00','12:00:00','15:00:00','https://res.cloudinary.com/dixwor2nn/image/upload/v1777398749/chullikkamb_1777398745.webp'),(20,'chullikkamb',2.00,NULL,'breakfast',1,3,'yuckkkkk','breakfast','mon,tue,wed,thu,fri','08:00:00','11:00:00',3,'08:00:00','11:00:00','12:00:00','15:00:00','https://res.cloudinary.com/dixwor2nn/image/upload/v1777398753/chullikkamb_1777398749.webp');
+INSERT INTO `food_items` (`id`,`name`,`price`,`image`,`meal_type`,`available`,`stock`,`about`,`category`,`days`,`default_stock`,`image_url`) VALUES (3,'Chicken Biriyani',75.00,'chicken_biriyani_1753029774.webp','lunch',1,25,'i am a junk food','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(4,'Veg Meals',50.00,'veg_meals_1753029797.webp','lunch',1,25,'i am a vegan broo....','lunch','mon,tue,wed,thu,fri,sun',25,NULL),(5,'chappathii',12.00,'chappathii_1753029826.webp',NULL,1,10,'shbuybfyubwuy','lunch','sun',25,NULL),(6,'bababa pufs',28.00,'bababa_pufs_1775905680.webp',NULL,1,25,'Hello there i am pufs ...','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(7,'Dosa',12.00,'dosa_1775905543.webp',NULL,1,25,'Dosa dosa dosa','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(8,'Idli sambar',59.00,'idli_sambar_1753701382.webp',NULL,1,25,'Vssjsnsbsb','breakfast','mon,tue,wed,thu,fri,sat,sun',25,'https://res.cloudinary.com/dixwor2nn/image/upload/v1777398901/idli_sambar_1777398900.webp'),(10,'porotta',12.00,'porotta_1753029901.webp',NULL,1,10,'ghhg','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(12,'berger',70.00,'berger.webp',NULL,1,10,'yummy','breakfast','mon,tue,wed,thu,fri,sat,sun',20,NULL),(13,'kozhi tikka 65',500.00,'kozhi_tikka_65.webp',NULL,1,25,'i am yummyyyyy','lunch','mon,tue,wed,thu,fri,sat,sun',25,NULL),(14,'Kaytha chakka',20.00,'kaytha_chakka.webp',NULL,1,25,'Very very tasty','lunch','mon,tue,wed,thu,fri,sat,sun',25,NULL),(15,'keethuuuuu',1.00,'keethuuuuu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(16,'paruu',1.00,'paruu.webp',NULL,1,25,'poison','breakfast','mon,tue,wed,thu,fri,sat,sun',25,NULL),(17,'midhun',7.00,'midhun_1758195687.webp','breakfast',1,7,'helo there eat me.....i am yummy','breakfast','mon,tue,wed,thu,fri,sat,sun',7,NULL),(18,'Cristiano',7.00,'cristiano_1775905755.webp','lunch',1,25,'Goat ?','lunch','mon,tue,wed,thu,fri,sat,sun',25,NULL),(19,'chullikkamb',2.00,NULL,'breakfast',1,3,'yuckkkkk','breakfast','mon,tue,wed,thu,fri',3,'https://res.cloudinary.com/dixwor2nn/image/upload/v1777398749/chullikkamb_1777398745.webp'),(20,'chullikkamb',2.00,NULL,'breakfast',1,3,'yuckkkkk','breakfast','mon,tue,wed,thu,fri',3,'https://res.cloudinary.com/dixwor2nn/image/upload/v1777398753/chullikkamb_1777398749.webp');
 /*!40000 ALTER TABLE `food_items` ENABLE KEYS */;
 UNLOCK TABLES;
+
+--
+-- Table structure for table `menu_time_defaults`
+--
+
+DROP TABLE IF EXISTS `menu_time_defaults`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `menu_time_defaults` (
+  `category` enum('breakfast','lunch') NOT NULL,
+  `default_start` time NOT NULL,
+  `default_end` time NOT NULL,
+  PRIMARY KEY (`category`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `menu_time_defaults`
+--
+
+LOCK TABLES `menu_time_defaults` WRITE;
+/*!40000 ALTER TABLE `menu_time_defaults` DISABLE KEYS */;
+INSERT INTO `menu_time_defaults` VALUES ('breakfast','08:00:00','23:00:00'),('lunch','12:00:00','23:00:00');
+/*!40000 ALTER TABLE `menu_time_defaults` ENABLE KEYS */;
+UNLOCK TABLES;
+
+
+
 
 --
 -- Table structure for table `order_history`

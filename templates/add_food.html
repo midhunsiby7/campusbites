@@ -50,28 +50,6 @@
         </div>
       </div>
 
-      <hr>
-
-      <!-- Breakfast defaults -->
-      <div class="form-group breakfast-default">
-        <label for="default_breakfast_start">Default Breakfast Start</label>
-        <input type="time" name="default_breakfast_start" id="default_breakfast_start" data-default="08:00" value="08:00">
-      </div>
-      <div class="form-group breakfast-default">
-        <label for="default_breakfast_end">Default Breakfast End</label>
-        <input type="time" name="default_breakfast_end" id="default_breakfast_end" data-default="11:00" value="11:00">
-      </div>
-
-      <!-- Lunch defaults -->
-      <div class="form-group lunch-default">
-        <label for="default_lunch_start">Default Lunch Start</label>
-        <input type="time" name="default_lunch_start" id="default_lunch_start" data-default="12:00" value="12:00">
-      </div>
-      <div class="form-group lunch-default">
-        <label for="default_lunch_end">Default Lunch End</label>
-        <input type="time" name="default_lunch_end" id="default_lunch_end" data-default="15:00" value="15:00">
-      </div>
-
       <div class="form-group">
         <label for="default_stock">Default Stock:</label>
         <input type="number" name="default_stock" id="default_stock" min="0" value="0" required>
@@ -85,37 +63,6 @@
       <button type="submit">Add Food</button>
     </form>
   </div>
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const catSelect = document.querySelector('select[name="category"]');
-  const breakfastFields = document.querySelectorAll('.breakfast-default');
-  const lunchFields = document.querySelectorAll('.lunch-default');
-
-  const breakfastStart = document.querySelector('input[name="default_breakfast_start"]');
-  const breakfastEnd   = document.querySelector('input[name="default_breakfast_end"]');
-  const lunchStart     = document.querySelector('input[name="default_lunch_start"]');
-  const lunchEnd       = document.querySelector('input[name="default_lunch_end"]');
-
-  function toggleFields() {
-    const cat = catSelect.value;
-    if (cat === 'breakfast') {
-      breakfastFields.forEach(el => el.style.display = 'block');
-      lunchFields.forEach(el => el.style.display = 'none');
-      if (!breakfastStart.value) breakfastStart.value = breakfastStart.dataset.default || '08:00';
-      if (!breakfastEnd.value) breakfastEnd.value = breakfastEnd.dataset.default || '11:00';
-    } else {
-      breakfastFields.forEach(el => el.style.display = 'none');
-      lunchFields.forEach(el => el.style.display = 'block');
-      if (!lunchStart.value) lunchStart.value = lunchStart.dataset.default || '12:00';
-      if (!lunchEnd.value) lunchEnd.value = lunchEnd.dataset.default || '15:00';
-    }
-  }
-
-  catSelect.addEventListener('change', toggleFields);
-  toggleFields();
-});
-</script>
 
 </body>
 </html>
