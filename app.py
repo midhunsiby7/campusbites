@@ -2508,7 +2508,7 @@ def orders():
     for order in all_orders:
         order_items_list = []
         cursor.execute("""
-            SELECT oi.quantity, fi.name, fi.image, fi.price
+            SELECT oi.quantity, fi.name, fi.image, fi.image_url, fi.price
             FROM order_items oi
             JOIN food_items fi ON oi.food_id = fi.id
             WHERE oi.order_id = %s

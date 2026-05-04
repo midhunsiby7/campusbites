@@ -87,7 +87,7 @@
 
       <div class="form-group">
         <label for="current-image">Current Image</label><br>
-        {% if food.image %}
+        {% if food.image or food.image_url %}
           <img src="{{ food.image_url or url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="Current Image" style="max-height: 100px; border-radius: 8px;">
         {% else %}
           No Image

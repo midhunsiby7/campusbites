@@ -64,7 +64,7 @@
         </div>
         <div class="order-body order-body-grid">
           <div class="order-thumb-wrap">
-            {% if order.food_image %}
+            {% if order.food_image or order.food_image_url %}
               <img class="order-thumb" src="{{ order.food_image_url or url_for('static', filename='uploads/' + (order.food_image or 'default.png')) }}" alt="{{ order.food_name or 'Food image' }}">
             {% else %}
               <div class="order-thumb order-thumb-fallback">No image</div>
