@@ -79,7 +79,7 @@
                 <h4>Items:</h4>
                 {% for item in order['items'] %}
                   <div class="food-item-entry">
-                    <img src="{{ url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
+                    <img src="{{ item.image_url or url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
                     <span>{{ item.name }} × {{ item.quantity }} (₹{{ item.price }} each)</span>
                   </div>
                 {% endfor %}
@@ -114,7 +114,7 @@
                 <h4>Items:</h4>
                 {% for item in order['items'] %}
                   <div class="food-item-entry">
-                    <img src="{{ url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
+                    <img src="{{ item.image_url or url_for('static', filename='uploads/' + (item.image or 'default.png')) }}" alt="{{ item.name }}">
                     <span>{{ item.name }} × {{ item.quantity }} (₹{{ item.price }} each)</span>
                   </div>
                 {% endfor %}

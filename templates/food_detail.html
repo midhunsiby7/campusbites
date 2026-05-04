@@ -17,7 +17,7 @@
   <div class="food-detail-container"
        data-food-id="{{ food.id }}"
        data-food-price="{{ food.price }}">
-    <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
+    <img src="{{ food.image_url or url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
     <h2>{{ food.name }}</h2>
     <p class="price">Price: ₹{{ food.price }}</p>
     <p class="stock">Available: <span id="current-stock">{{ food.stock }}</span></p>
@@ -34,7 +34,7 @@
   <div id="review-popup" class="popup">
     <div class="popup-content">
       <h3>Confirm Order</h3>
-      <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" width="100%" alt="{{ food.name }}">
+      <img src="{{ food.image_url or url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" width="100%" alt="{{ food.name }}">
       <p>{{ food.name }} - ₹{{ food.price }}</p>
       <label>Quantity:
         <input type="number" id="order-qty" value="1" min="1" max="{{ food.stock }}" oninput="calculateTotal()">

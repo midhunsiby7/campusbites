@@ -52,7 +52,7 @@
           {% for item in items %}
           <li>
               {% if item.food_image %}
-                  <img src="{{ url_for('static', filename='uploads/' + (item.food_image or 'default.png')) }}" alt="{{ item.food_name }}">
+                  <img src="{{ item.food_image_url or url_for('static', filename='uploads/' + (item.food_image or 'default.png')) }}" alt="{{ item.food_name }}">
               {% endif %}
               {{ item.food_name }} × {{ item.quantity }} — ₹{{ item.quantity * item.price }}
           </li>

@@ -26,6 +26,9 @@ import logging
 import traceback
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+import cloudinary
+import cloudinary.uploader
+import cloudinary.api
 
 # Load environment variables
 load_dotenv()
@@ -34,6 +37,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
+
+cloudinary.config(
+  cloud_name = os.getenv('CLOUDINARY_CLOUD_NAME'),
+  api_key = os.getenv('CLOUDINARY_API_KEY'),
+  api_secret = os.getenv('CLOUDINARY_API_SECRET')
+)
 
 # At the top
 app = Flask(__name__)
@@ -435,8 +444,7 @@ def after_request(response):
 def process_and_save_image(file, food_name):
     clean_name = re.sub(r'[^a-zA-Z0-9]+', '_', food_name.lower())
     timestamp = int(time_module.time())
-    new_filename = f"{clean_name}_{timestamp}.webp"
-    save_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
+    new_filename = f"{clean_name}_{timestamp}"
 
     try:
         image = Image.open(file)
@@ -461,8 +469,12 @@ def process_and_save_image(file, food_name):
         image = image.crop((left, top, right, bottom))
         image = image.resize(TARGET_SIZE, Image.Resampling.LANCZOS)
         
-        image.convert("RGB").save(save_path, "webp", quality=100)
-        return new_filename
+        img_byte_arr = io.BytesIO()
+        image.convert("RGB").save(img_byte_arr, format='WEBP', quality=100)
+        img_byte_arr.seek(0)
+        
+        upload_result = cloudinary.uploader.upload(img_byte_arr, public_id=new_filename, format="webp")
+        return upload_result['secure_url']
     except Exception as e:
         print(f"Error processing image {file.filename}: {e}")
         return None
@@ -886,7 +898,7 @@ def admin_dashboard():
     query = """
     SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
            users.name AS user_name, orders.created_at, orders.total,
-           fi.image AS food_image, fi.name AS food_name,
+           fi.image AS food_image, fi.image_url AS food_image_url, fi.name AS food_name,
            item_counts.total_items
     FROM orders
     JOIN users ON orders.user_id = users.id
@@ -1005,29 +1017,29 @@ def add_food():
 
         # Image handling (optional)
         image = request.files.get('image')
-        image_filename = None
+        image_url = None
         if image and image.filename != '' and allowed_file(image.filename):
-            # use your process_and_save_image helper for consistent naming/processing
             processed = process_and_save_image(image, name)
             if processed:
-                image_filename = processed
+                image_url = processed
 
         # Save to DB
         cursor.execute("""
             INSERT INTO food_items
-            (name, price, image, meal_type, stock, about, category, available,
+            (name, price, image, image_url, meal_type, stock, about, category, available,
              days, default_start_time, default_end_time, default_stock,
              default_breakfast_start, default_breakfast_end, default_lunch_start, default_lunch_end)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             name,
             price,
-            image_filename,
-            category,               # your table has meal_type -- keep consistent (you also have category)
-            default_stock,         # stock column (initial stock)
+            None,                  # Legacy image filename
+            image_url,
+            category,              # meal_type
+            default_stock,         # stock
             about,
-            category,              # category col (breakfast/lunch)
-            1,                     # available default true
+            category,              # category
+            1,                     # available
             days_str,
             legacy_start,
             legacy_end,
@@ -1093,7 +1105,7 @@ def edit_food(food_id):
         if image_url:
             cursor.execute("""
                 UPDATE food_items
-                SET name=%s, price=%s, image=%s, category=%s, about=%s, available=%s, stock=%s,
+                SET name=%s, price=%s, image_url=%s, category=%s, about=%s, available=%s, stock=%s,
                     days=%s,
                     default_start_time=%s, default_end_time=%s, default_stock=%s,
                     default_breakfast_start=%s, default_breakfast_end=%s,
@@ -1404,7 +1416,7 @@ def admin_view_order(order_id):
     cursor.execute("""
         SELECT o.id AS order_id, o.status, o.token_number, o.total, o.created_at,
                u.name AS user_name,
-               fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image
+               fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image, fi.image_url AS food_image_url
         FROM orders o
         JOIN users u ON o.user_id = u.id
         JOIN order_items oi ON o.id = oi.order_id
@@ -1463,7 +1475,7 @@ def scan_order(order_id):
     cursor.execute("""
         SELECT o.id AS order_id, o.status, o.token_number, o.total, o.created_at,
                u.name AS user_name,
-               fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image
+               fi.name AS food_name, fi.price, oi.quantity, fi.image AS food_image, fi.image_url AS food_image_url
         FROM orders o
         JOIN users u ON o.user_id = u.id
         JOIN order_items oi ON o.id = oi.order_id
@@ -1526,7 +1538,7 @@ def offline_menu_items():
     conn, cursor = get_db_connection()
     today = today_ist_date()
     cursor.execute("""
-        SELECT fi.id AS food_id, fi.name, fi.price, fi.image, fi.category, dm.stock
+        SELECT fi.id AS food_id, fi.name, fi.price, fi.image, fi.image_url, fi.category, dm.stock
         FROM food_items fi
         JOIN daily_menu dm ON fi.id = dm.food_id
         WHERE DATE(dm.available_date) = %s
@@ -1542,6 +1554,7 @@ def offline_menu_items():
             'name': item['name'],
             'price': float(item['price']),
             'image': item['image'],
+            'image_url': item['image_url'],
             'category': item['category'],
             'stock': item['stock'],
         })
@@ -1712,7 +1725,7 @@ def cart():
     conn.commit()
 
     cursor.execute("""
-        SELECT cart_items.id, food_items.name, food_items.price, food_items.image, cart_items.quantity, cart_items.food_id
+        SELECT cart_items.id, food_items.name, food_items.price, food_items.image, food_items.image_url, cart_items.quantity, cart_items.food_id
         FROM cart_items
         JOIN food_items ON cart_items.food_id = food_items.id
         WHERE cart_items.user_id = %s
@@ -2558,7 +2571,7 @@ def api_admin_orders():
     query = """
         SELECT orders.id, orders.token_number, orders.status, orders.payment_status,
                users.name AS user_name, orders.created_at, orders.total,
-               fi.image AS food_image, fi.name AS food_name,
+               fi.image AS food_image, fi.image_url AS food_image_url, fi.name AS food_name,
                item_counts.total_items
         FROM orders
         JOIN users ON orders.user_id = users.id
@@ -2609,6 +2622,7 @@ def api_admin_orders():
             'payment_status': order['payment_status'],
             'user_name': order['user_name'],
             'food_image': order.get('food_image'),
+            'food_image_url': order.get('food_image_url'),
             'food_name': food_name,
             'total': float(order['total']),
             'created_at': order['created_at'].strftime('%d %b, %I:%M %p'),

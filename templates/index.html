@@ -27,7 +27,7 @@
 
     {% for food in foods %}
     <div class="food-item" onclick="location.href='/food/{{ food.id }}'" data-food-id="{{ food.id }}">
-      <img src="{{ url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
+      <img src="{{ food.image_url or url_for('static', filename='uploads/' + (food.image or 'default.png')) }}" alt="{{ food.name }}">
       <h4>{{ food.name }}</h4>
       <p>₹{{ food.price }}</p>
       <p><strong>Available:</strong> <span class="stock-count">{{ food.stock }}</span></p>
