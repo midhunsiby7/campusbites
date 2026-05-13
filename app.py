@@ -1786,12 +1786,6 @@ def order_single():
             conn.rollback()
             return jsonify({'success': False, 'error': 'This item is not on today\'s menu.'}), 400
 
-        st = to_time(row['start_time'])
-        et = to_time(row['end_time'])
-        if not (st <= current_time <= et):
-            conn.rollback()
-            return jsonify({'success': False, 'error': 'This item is not available at the current time.'}), 400
-
         price = float(row['price'])
         total = qty * price
 
