@@ -16,9 +16,9 @@
 
 html[data-theme="dark"],
 body.dark {
-  --bg: #0a0a0a;
-  --surface: #141414;
-  --surface-2: #1e1e1e;
+  --bg: #000000;
+  --surface: #0d0d0d;
+  --surface-2: #171717;
   --text: #e4e4e7;
   --text-muted: #a1a1aa;
   --border: #2e2e2e;
@@ -432,7 +432,7 @@ body.intro-page {
   width: 100%;
   margin: 0;
   padding: 0;
-  background: radial-gradient(circle at top left, #1a1a1a 0%, #0a0a0a 100%);
+  background: radial-gradient(circle at top left, #111111 0%, #000000 100%);
   font-family: 'Segoe UI', system-ui, sans-serif;
   overflow: hidden;
   position: relative;
