@@ -11,14 +11,14 @@
 
 html[data-theme="dark"],
 body.dark {
-  --bg: #0f172a;
-  --surface: #111c32;
-  --surface-2: #1c2a44;
-  --text: #e2e8f0;
-  --text-muted: #93a4bf;
-  --border: #2e405f;
+  --bg: #0a0a0a;
+  --surface: #141414;
+  --surface-2: #1e1e1e;
+  --text: #e4e4e7;
+  --text-muted: #a1a1aa;
+  --border: #2e2e2e;
   --primary: #60a5fa;
-  --shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
 }
 
 .food-detail-body {

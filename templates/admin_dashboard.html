@@ -34,18 +34,27 @@
   <main class="admin-main">
     <form method="get" action="/admin/dashboard" class="admin-filter-form" id="filter-form">
       <div class="filter-row">
-        <select name="status" id="statusFilter">
-          <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All</option>
-          <option value="confirmed" {% if selected_status == 'confirmed' %}selected{% endif %}>Confirmed</option>
-          <option value="delivered" {% if selected_status == 'delivered' %}selected{% endif %}>Delivered</option>
-        </select>
-        <select name="sort" id="sortSelect">
-          <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>Newest First</option>
-          <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>Oldest First</option>
-        </select>
+        <div class="filter-field">
+          <label for="statusFilter">Status</label>
+          <select name="status" id="statusFilter">
+            <option value="all" {% if selected_status == 'all' %}selected{% endif %}>All Orders</option>
+            <option value="confirmed" {% if selected_status == 'confirmed' %}selected{% endif %}>Confirmed</option>
+            <option value="delivered" {% if selected_status == 'delivered' %}selected{% endif %}>Delivered</option>
+          </select>
+        </div>
+        <div class="filter-field">
+          <label for="sortSelect">Sort By</label>
+          <select name="sort" id="sortSelect">
+            <option value="newest" {% if selected_sort == 'newest' %}selected{% endif %}>Newest First</option>
+            <option value="oldest" {% if selected_sort == 'oldest' %}selected{% endif %}>Oldest First</option>
+          </select>
+        </div>
       </div>
-      <div class="filter-row">
-        <input type="text" name="search" id="searchInput" placeholder="Search by name or token...">
+      <div class="filter-row" style="margin-top: 8px;">
+        <div class="search-field">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" name="search" id="searchInput" placeholder="Search by name or token...">
+        </div>
       </div>
     </form>
 
@@ -112,6 +121,9 @@
     const cards = Array.from(document.querySelectorAll(".order-card"));
     let visibleCount = 0;
 
+    // Check if user is actively filtering
+    const isFiltering = query.length > 0 || status !== 'all';
+
     cards.forEach(card => {
       const tokenText = card.querySelector(".order-body p:nth-child(1)")?.innerText.toLowerCase() || "";
       const userText = card.querySelector(".order-body p:nth-child(2)")?.innerText.toLowerCase() || "";
@@ -136,11 +148,12 @@
     });
     visibleCards.forEach(c => wrapper.appendChild(c));
 
-    if (visibleCount === 0) {
+    // Only show "no results" when user is actively searching/filtering
+    if (visibleCount === 0 && isFiltering) {
       if (!document.getElementById("no-results-msg")) {
         const msg = document.createElement("p");
         msg.id = "no-results-msg";
-        msg.style.cssText = "text-align:center; color: var(--text-muted); margin-top:20px;";
+        msg.style.cssText = "text-align:center; color: var(--text-muted); margin-top:20px; grid-column: 1/-1;";
         msg.innerText = "No matching orders found";
         wrapper.appendChild(msg);
       }
