@@ -1922,7 +1922,6 @@ def order_all_from_cart():
         # Lock and validate stock for each item atomically (prevents race conditions)
         # Implicit transaction is already running from the SELECT query above
         today = date.today()
-        current_time = datetime.now().time()
         for item in items:
             cursor.execute("""
                 SELECT stock FROM daily_menu
@@ -2356,7 +2355,6 @@ def add_to_cart():
     user_id = session.get('user_id')
     food_id = data['food_id']
     qty_to_add = int(data['quantity'])
-    current_time = datetime.now().time()
     today = date.today()
 
     cursor.execute("""
