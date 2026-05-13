@@ -2363,12 +2363,11 @@ def add_to_cart():
         SELECT stock FROM daily_menu
         WHERE food_id = %s
           AND DATE(available_date) = %s
-          AND %s BETWEEN start_time AND end_time
           AND stock > 0
-    """, (food_id, today, current_time))
+    """, (food_id, today))
     stock_row = cursor.fetchone()
     if not stock_row:
-        return jsonify({'error': 'This food is not available today or current time.'}), 400
+        return jsonify({'error': 'This food is not available today or out of stock.'}), 400
 
     available_stock = stock_row['stock']
 
