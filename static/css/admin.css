@@ -133,11 +133,7 @@
 }
 
 .order-card {
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--surface) 88%, var(--primary) 12%),
-    var(--surface)
-  );
+  background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--border) 80%, var(--primary) 20%);
   border-left: 4px solid var(--primary);
   border-radius: 14px;
@@ -280,11 +276,7 @@
 .order-detail {
   width: min(760px, calc(100% - 24px));
   margin: 20px auto;
-  background: linear-gradient(
-    145deg,
-    color-mix(in srgb, var(--surface) 90%, var(--primary) 10%),
-    var(--surface)
-  );
+  background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--border) 80%, var(--primary) 20%);
   border-radius: 16px;
   box-shadow: var(--shadow);

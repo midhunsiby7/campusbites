@@ -40,7 +40,7 @@
 
       <div class="order-info">
         <p><strong>Token:</strong> {{ order.token_number }}</p>
-        <p><strong>User:</strong> {{ order.user_name }} ({{ order.admission_number }})</p>
+        <p><strong>User:</strong> {{ order.user_name }} {% if order.admission_number %}({{ order.admission_number }}){% endif %}</p>
         <p><strong>Status:</strong> <span id="order-status-display">{{ order.status }}</span></p>
         <p><strong>Total:</strong> ₹{{ order.total }}</p>
         <p><strong>Time:</strong> {{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
